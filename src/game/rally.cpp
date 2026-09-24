@@ -79,6 +79,11 @@ void Rally::init(gs::System& sys) {
     vdp_ = &sys.vdp;
     buildArt(*vdp_, art_);
     radio_ = std::make_unique<Radio>(sys.apu);
+    if (!sys.headless) {  // the player's own songs become the YOUR MUSIC station
+        const std::string dir = sys.dataPath("music/");
+        radio_->loadUserMusic(dir, sys.dataPath("music-cache/"));
+        std::printf("Your music folder: %s (%zu tracks)\n", dir.c_str(), radio_->userTracks());
+    }
     sfx_ = std::make_unique<Sfx>(sys.apu);
     voice_ = std::make_unique<CoDriver>(sys.apu);
     if (!sys.headless || sys.scripted) voice_->loadAsync(sys.dataPath("voice/"));
@@ -189,7 +194,7 @@ void Rally::say(std::vector<std::string> lines, int frames, int pal) {
 void Rally::tuneRadio() {
     int st = radio_->next();
     sfx_->menuMove();
-    if (st >= 0) voice_->say(V_ST_BLADE + st, true);
+    if (radio_->voiceFor(st) >= 0) voice_->say(radio_->voiceFor(st), true);
 }
 
 // Station card: frequency and name, then the song, over a dark backing.

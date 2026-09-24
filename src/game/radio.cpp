@@ -16,7 +16,11 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <filesystem>
 #include <sstream>
+
+#include <SDL.h>
 
 #include "stages.h"
 
@@ -602,15 +606,121 @@ Song sixCylinderShake() {  // straight-eighths rock & roll, 12-bar in E
     return b.build({"intro", "head", "keysolo", "head", "end"});
 }
 
+
+gs::FMPatch synthBrass(float detune) {  // big 80s synth brass
+    gs::FMPatch p;
+    p.alg = 4;
+    p.fb = 0.72f;
+    p.op[0] = {1, 0.7f, 0.03f, 0.5f, 0.75f, 0.2f};
+    p.op[1] = {1, 1.0f, 0.02f, 0.8f, 0.85f, 0.25f};
+    p.op[2] = {1, 0.5f, 0.03f, 0.5f, 0.75f, 0.2f, 1.5f + detune};
+    p.op[3] = {1, 0.7f, 0.02f, 0.8f, 0.85f, 0.25f, -1.2f + detune};
+    p.drive = 0.8f;
+    p.tone = 3500;
+    p.vibRate = 5.0f;
+    p.vibDepth = 0.004f;
+    p.vibDelay = 0.35f;
+    p.glide = 1;
+    p.echo = 0.2f;
+    p.vol = 0.08f;
+    return p;
+}
+
+Song ironHeart() {  // fight anthem, D minor: stabbed chords and a big chorus
+    Builder b("IRON HEART", "STEEL RAVEN", 108, 4);
+    b.echo(0.28f, 0.25f, 0.2f)
+        .track("gtrL", rhythmGuitar(-0.8f), -0.8f)
+        .track("gtrR", rhythmGuitar(0.8f), 0.8f)
+        .track("bass", rockBass(), 0)
+        .track("lead", leadGuitar(), 0.1f)
+        .track("keys", pad(true), -0.25f);
+    const std::string beat = "K . H . S . H K K . H . S . H .";
+    const std::string riff = "D2 . . . . . D2 . . . D2 . . . . . | D2 . . . . . F2 . . . G2 . . . . .";
+    const std::string riffBass = "D1 . . . . . D1 . . . D1 . . . . . | D1 . . . . . F1 . . . G1 . . . . .";
+    const std::string riffDrums = "KC . . . . . KC . . . KC . . . . . | KC . . . . . KC . . . KC . . S S S";
+    const std::string verseGtr = "D2 x x x x x x x x x x x C2 x x x | A#1 x x x x x x x C2 x x x D2 - - -";
+    const std::string verseBass = "D1 - D1 - D1 - D1 - D1 - D1 - C2 - C2 - | A#1 - A#1 - A#1 - A#1 - C2 - C2 - D2 - - -";
+    b.section("riff", {{"gtr*", riff}, {"bass", riffBass}, {"drums", riffDrums}});
+    b.section("verse", {{"gtr*", verseGtr}, {"bass", verseBass}, {"drums", beat},
+                        {"lead", "A4 - - - A4 - G4 - F4 - - - E4 - D4 - | F4 - - - - - E4 - D4 - - - . . . . |"
+                                 "A4 - - - C5 - A4 - G4 - - - F4 - E4 - | D4 - - - - - - - . . . . . . . ."}});
+    b.section("pre", {{"gtr*", rep("A#1 -", 8) + rep("C2 -", 8) + rep("A#1 -", 8) + "C2 - C2 - C2 - C2 - A1 - A1 - A1 - A1 -"},
+                      {"bass", rep("A#1 -", 8) + rep("C2 -", 8) + rep("A#1 -", 8) + "C2 - C2 - C2 - C2 - A1 - A1 - A1 - A1 -"},
+                      {"keys", hold("A#3:M", 16) + hold("C4:M", 16) + hold("A#3:M", 16) + hold("C4:M", 8) + hold("A3:M", 8)},
+                      {"lead", "D5 - - - C5 - D5 - F5 - - - E5 - - - | E5 - - - D5 - E5 - G5 - - - - - - - |"
+                               "F5 - - - E5 - F5 - A5 - - - G5 - F5 - | E5 - - - - - - - C#5 - - - - - - -"},
+                      {"drums", rep(beat, 3) + rep("S", 16)}});
+    b.section("chorus", {{"gtr*", rep("D2 -", 8) + rep("A#1 -", 8) + rep("F2 -", 8) + rep("C2 -", 8)},
+                         {"bass", rep("D2 -", 8) + rep("A#1 -", 8) + rep("F1 -", 8) + rep("C2 -", 8)},
+                         {"keys", hold("D4:m", 16) + hold("A#3:M", 16) + hold("F3:M", 16) + hold("C4:M", 16)},
+                         {"lead", "A5 - - - - - G5 - A5 - - - D6 - - - | C6 - - - A#5 - A5 - F5 - - - - - - - |"
+                                  "A5 - - - - - G5 - A5 - - - C6 - A5 - | G5 - - - - - E5 - C5 - - - - - - - |"
+                                  "A5 - - - - - G5 - A5 - - - D6 - - - | D6 - - - C6 - A#5 - C6 - - - D6 - F6 - |"
+                                  "E6 - - - D6 - C6 - A5 - - - G5 - A5 - | A5 - - - - - - - - - - - . . . ."},
+                         {"drums", "KC . H . S . H K K . H . S . H . | " + rep(beat, 6) + " K . H . S . H . K . S . S S S S"}});
+    b.section("solo", {{"gtr*", verseGtr}, {"bass", verseBass}, {"drums", beat},
+                       {"lead", "D5 F5 G5 A5 C6 - A5 - C6/D6 - - - C6 A5 G5 F5 | G5 - - - F5 - D5 - F5 G5 A5 - G5 F5 D5 C5 |"
+                                "D5 - F5 - A5 - D6 - F6 - E6 D6 C6 - A5 - | A#5/C6 - - - - - - - A5 G5 F5 E5 D5 - - - |"
+                                "A5 C6 D6 F6 A6 - G6 F6 D6 - C6 A5 G5 - F5 - | D6 C6 A5 C6 D6 C6 A5 C6 D6 C6 A5 G5 F5 E5 D5 C5 |"
+                                "D5 - - - A5 - - - D6 - - - F6 - - - | E6/F6 - - - - - - - E6 - D6 - C#6 - - -"}});
+    b.section("outro", {{"gtr*", "D2 . . . . . D2 . . . D2 . . . . . | " + hold("D2", 16)},
+                        {"bass", "D1 . . . . . D1 . . . D1 . . . . . | " + hold("D1", 16)},
+                        {"keys", rep(".", 16) + hold("D4:m", 16)},
+                        {"lead", rep(".", 16) + hold("A5", 16)},
+                        {"drums", "KC . . . . . KC . . . KC . . . . . | KC " + rep(".", 15)}});
+    return b.build({"riff", "riff", "verse", "pre", "chorus", "riff", "verse", "pre", "chorus", "solo", "chorus", "outro"});
+}
+
+Song launchWindow() {  // synth-brass arena anthem, A minor
+    Builder b("LAUNCH WINDOW", "NORTHERN LIGHTS", 118, 4);
+    b.echo(0.38f, 0.35f, 0.3f)
+        .track("brassA", synthBrass(0), -0.2f)
+        .track("brassB", synthBrass(0.9f), 0.35f)
+        .track("pad", pad(false), 0)
+        .track("bass", rockBass(), 0)
+        .track("gtr", rhythmGuitar(0), -0.6f)
+        .track("lead", leadGuitar(), 0.15f);
+    const std::string beat = "K . H . S . H K K . H . S . H .";
+    const std::string hookA = "E5 - A5 - B5 - C6 - - - B5 - A5 - E6 - | F6 - - - E6 - C6 - A5 - - - C6 - - - |"
+                              "D6 - G5 - B5 - D6 - G6 - - - D6 - B5 - | E6 - - - - - D6 - B5 - G#5 - - - - -";
+    const std::string hookB = "C5 - E5 - G5 - A5 - - - G5 - E5 - C6 - | C6 - - - A5 - A5 - F5 - - - A5 - - - |"
+                              "B5 - D5 - G5 - B5 - D6 - - - B5 - G5 - | B5 - - - - - A5 - G#5 - E5 - - - - -";
+    const std::string pads = hold("A3:m", 16) + hold("F3:M", 16) + hold("G3:M", 16) + hold("E3:M", 16);
+    const std::string gallop = rep("A1 - A1 A1", 4) + rep("F1 - F1 F1", 4) + rep("G1 - G1 G1", 4) + rep("E1 - E1 E1", 4);
+    const std::string gtr8 = rep("A2 -", 8) + rep("F2 -", 8) + rep("G2 -", 8) + rep("E2 -", 8);
+    const std::string hookDrums = "KC . H . S . H K K . H . S . H . | " + rep(beat, 2) + " K . H . S . H . K K S . S S T L";
+    b.section("intro", {{"brassA", hookA}, {"brassB", hookB}, {"pad", pads},
+                        {"drums", rep(".", 48) + " S . S S S . S S T . T T L . L L"}});
+    b.section("hook", {{"brassA", hookA}, {"brassB", hookB}, {"pad", pads}, {"bass", gallop}, {"gtr", gtr8}, {"drums", hookDrums}});
+    b.section("verse", {{"gtr", rep("A2 x x x", 4) + rep("F2 x x x", 4) + rep("G2 x x x", 4) + rep("E2 x x x", 4)},
+                        {"bass", gallop}, {"pad", pads}, {"drums", "K . H . S . H . K . H . S . H ."},
+                        {"lead", "A4 - - - C5 - B4 - A4 - - - E4 - - - | F4 - - - A4 - G4 - F4 - - - C4 - - - |"
+                                 "G4 - - - B4 - A4 - G4 - - - D5 - - - | E5 - - - D5 - C5 - B4 - - - G#4 - - -"}});
+    b.section("chorus", {{"gtr", gtr8}, {"bass", gallop}, {"pad", pads},
+                         {"brassA", hold("E5", 16) + hold("F5", 16) + hold("G5", 16) + hold("G#5", 16)},
+                         {"brassB", hold("C5", 16) + hold("C5", 16) + hold("D5", 16) + hold("E5", 16)},
+                         {"lead", "C6 - - - B5 - A5 - B5 - - - C6 - E6 - | C6 - - - - - A5 - F5 - - - A5 - - - |"
+                                  "B5 - - - - - G5 - D6 - - - B5 - G5 - | B5 - - - G#5 - - - E5 - - - - - - -"},
+                         {"drums", "KC . H . S . H K K . H . S . H . | " + rep(beat, 6) + " K . H . S . H . K . S . S S S S"}});
+    b.section("solo", {{"gtr", gtr8}, {"bass", gallop}, {"pad", pads}, {"drums", hookDrums},
+                       {"lead", "E6 D6 C6 B5 A5 B5 C6 E6 A6 - - - G6 E6 C6 A5 | F6 - E6 - C6 - A5 - C6 - E6 - F6 - A6 - |"
+                                "G6 F6 D6 B5 G5 B5 D6 G6 B6/C7 - - - B6 G6 D6 B5 | G#6 - - - B6 - - - E6 - - - . . . ."}});
+    b.section("end", {{"brassA", hold("A5", 32)}, {"brassB", hold("E5", 32)}, {"pad", hold("A3:m", 32)},
+                      {"bass", hold("A1", 16) + rep(".", 16)}, {"gtr", hold("A2", 32)}, {"drums", "KC " + rep(".", 31)}});
+    return b.build({"intro", "hook", "verse", "chorus", "hook", "verse", "chorus", "solo", "hook", "chorus", "end"});
+}
+
 }  // namespace
 
 // ------------------------------------------------------------ the radio
 
 Radio::Radio(gs::APU& apu) : apu_(apu) {
-    songs_ = {neonKnuckles(), redlineRomance(), heartsInChrome(), rainOnNeon(), gravelBoogie(), sixCylinderShake()};
+    songs_ = {neonKnuckles(), redlineRomance(), heartsInChrome(), rainOnNeon(), gravelBoogie(), sixCylinderShake(),
+              ironHeart(), launchWindow()};
     stations_[0] = {"88.1", "THE BLADE", "HAIR METAL", V_ST_BLADE, {0, 1}};
     stations_[1] = {"101.5", "NEON FM", "SYNTH POP", V_ST_NEON, {2, 3}};
     stations_[2] = {"94.7", "KOOL", "ROCK & ROLL", V_ST_KOOL, {4, 5}};
+    stations_[3] = {"96.6", "ARENA FM", "ANTHEMS", V_ST_ARENA, {6, 7}};
     kick_ = drum(0);
     snare_ = drum(1);
     clap_ = drum(2);
@@ -634,6 +744,10 @@ void Radio::release() {
 
 void Radio::startSong(bool fromTop) {
     if (station_ < 0) return;
+    if (station_ == USER_STATION) {  // your music: userTick() starts the track once it has loaded
+        card_ = 200;
+        return;
+    }
     Station& st = stations_[station_];
     const Song& s = songs_[st.songs[st.song]];
     if (fromTop) st.step = 0;
@@ -652,18 +766,62 @@ void Radio::startSong(bool fromTop) {
 }
 
 int Radio::next() {
-    tuneTo(station_ + 1 >= NUM_STATIONS ? -1 : station_ + 1);
+    const int count = NUM_STATIONS + (user_.count() ? 1 : 0);
+    tuneTo(station_ + 1 >= count ? -1 : station_ + 1);
     return station_;
 }
 
+int Radio::voiceFor(int station) const {
+    return station >= 0 && station < NUM_STATIONS ? stations_[station].voice : -1;
+}
+
+void Radio::loadUserMusic(const std::string& dir, const std::string& cacheDir) { user_.scan(dir, cacheDir); }
+
+void Radio::userStop() {
+    if (userPlaying_) userPos_ = apu_.position(1);
+    apu_.play(1, nullptr);
+    userPlaying_ = false;
+}
+
+// Your music: start the current track once loaded, move on when it ends.
+void Radio::userTick() {
+    const size_t n = user_.count();
+    if (!n) return;
+    if (!userPlaying_) {
+        user_.request(userTrack_);
+        if (const gs::Sample* s = user_.get(userTrack_)) {
+            apu_.play(1, s, 0.6f, 1, 0, userPos_);
+            userPlaying_ = true;
+            userSkips_ = 0;
+            card_ = 200;
+            user_.request(userNext());  // get the next one ready
+        } else if (user_.failed(userTrack_) && ++userSkips_ <= int(n)) {
+            userTrack_ = userNext();  // unreadable file: skip it
+            userPos_ = 0;
+        }
+        return;
+    }
+    if (apu_.playing(1)) {
+        userPos_ = apu_.position(1);
+        return;
+    }
+    // Track finished.
+    userPlaying_ = false;
+    userTrack_ = userNext();
+    userPos_ = 0;
+    user_.keepOnly(userTrack_, userNext());
+}
+
 void Radio::tuneTo(int station) {
-    if (station_ >= 0) stations_[station_].leftAt = frame_;
+    if (station_ == USER_STATION) userStop();  // remembers where you were in the track
+    else if (station_ >= 0) stations_[station_].leftAt = frame_;
     release();
     station_ = station;
     static_ = 16;  // a burst of static while the dial moves
     apu_.noiseBurst(0.22f, 11000, 0.18f);
     card_ = 200;
     if (station_ < 0) return;
+    if (station_ == USER_STATION) return;
     // The station kept broadcasting while we were away: skip ahead.
     Station& st = stations_[station_];
     long away = st.leftAt ? frame_ - st.leftAt : 0;
@@ -690,12 +848,14 @@ void Radio::duck(bool on) {
 
 std::string Radio::stationLine() const {
     if (station_ < 0) return "RADIO OFF";
+    if (station_ == USER_STATION) return "YOUR MUSIC  " + std::to_string(user_.count()) + (user_.count() == 1 ? " TRACK" : " TRACKS");
     const Station& st = stations_[station_];
     return std::string(st.freq) + " " + st.name + "  " + st.genre;
 }
 
 std::string Radio::songLine() const {
     if (station_ < 0) return "";
+    if (station_ == USER_STATION) return userPlaying_ ? user_.title(userTrack_) : "LOADING " + user_.title(userTrack_);
     const Station& st = stations_[station_];
     const Song& s = songs_[st.songs[st.song]];
     return s.title + " - " + s.artist;
@@ -783,6 +943,10 @@ void Radio::tick() {
         return;
     }
     if (station_ < 0) return;
+    if (station_ == USER_STATION) {
+        userTick();
+        return;
+    }
     if (gap_ > 0) {
         if (--gap_ == 0) startSong(true);
         return;
@@ -798,6 +962,172 @@ void Radio::tick() {
         doStep();
         timer_ += sf;
     }
+}
+
+
+// ------------------------------------------------------------ your music
+
+namespace {
+
+std::string shQuote(const std::string& s) {
+    std::string out = "'";
+    for (char c : s) out += c == '\'' ? std::string("'\\''") : std::string(1, c);
+    return out + "'";
+}
+
+bool isAudio(const std::string& ext) {
+    static const char* ok[] = {".wav", ".mp3", ".m4a", ".aac", ".flac", ".aif", ".aiff", ".caf", ".ogg"};
+    for (const char* e : ok)
+        if (ext == e) return true;
+    return false;
+}
+
+}  // namespace
+
+UserMusic::~UserMusic() {
+    {
+        std::lock_guard<std::mutex> l(m_);
+        stop_ = true;
+    }
+    cv_.notify_all();
+    if (worker_.joinable()) worker_.join();
+}
+
+void UserMusic::scan(const std::string& dir, const std::string& cacheDir) {
+#ifdef __EMSCRIPTEN__
+    (void)dir;
+    (void)cacheDir;  // a browser has no music folder
+#else
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    fs::create_directories(cacheDir, ec);
+    cache_ = cacheDir;
+    std::vector<std::string> files;
+    for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+        if (!it->is_regular_file(ec)) continue;
+        std::string ext = it->path().extension().string();
+        for (auto& c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
+        if (isAudio(ext)) files.push_back(it->path().string());
+    }
+    std::sort(files.begin(), files.end());
+    for (auto& f : files) {
+        auto t = std::make_unique<Track>();
+        t->path = f;
+        tracks_.push_back(std::move(t));
+    }
+    if (!tracks_.empty()) worker_ = std::thread([this] { run(); });
+#endif
+}
+
+std::string UserMusic::title(size_t i) const {
+    if (i >= tracks_.size()) return "";
+    std::string name = std::filesystem::path(tracks_[i]->path).stem().string();
+    std::string out;
+    for (char c : name) {  // keep what the system font can draw
+        unsigned char u = static_cast<unsigned char>(std::toupper(static_cast<unsigned char>(c)));
+        out += (std::isalnum(u) || std::strchr(" .,:!?'-&()", u)) && u < 128 ? char(u) : ' ';
+    }
+    return out.substr(0, 36);
+}
+
+void UserMusic::request(size_t i) {
+    if (i >= tracks_.size()) return;
+    int expected = 0;
+    if (!tracks_[i]->state.compare_exchange_strong(expected, 1)) return;  // already queued, ready or failed
+    {
+        std::lock_guard<std::mutex> l(m_);
+        queue_.push_back(i);
+    }
+    cv_.notify_one();
+}
+
+const gs::Sample* UserMusic::get(size_t i) const {
+    return i < tracks_.size() && tracks_[i]->state == 2 ? &tracks_[i]->sample : nullptr;
+}
+
+bool UserMusic::failed(size_t i) const { return i < tracks_.size() && tracks_[i]->state == 3; }
+
+void UserMusic::keepOnly(size_t a, size_t b) {
+    // Only ever called when the audio chip is no longer playing any of these.
+    for (size_t i = 0; i < tracks_.size(); i++) {
+        if (i == a || i == b || tracks_[i]->state != 2) continue;
+        tracks_[i]->sample = gs::Sample{};
+        tracks_[i]->state = 0;
+    }
+}
+
+void UserMusic::run() {
+    for (;;) {
+        size_t i;
+        {
+            std::unique_lock<std::mutex> l(m_);
+            cv_.wait(l, [this] { return stop_ || !queue_.empty(); });
+            if (stop_) return;
+            i = queue_.front();
+            queue_.pop_front();
+        }
+        Track& t = *tracks_[i];
+        t.state = decode(t) ? 2 : 3;
+    }
+}
+
+// Get a 16-bit stereo 44.1 kHz copy of the track in memory. WAV is read
+// directly; anything else is converted once into the cache with afconvert
+// (built into macOS) or ffmpeg.
+bool UserMusic::decode(Track& t) {
+#ifdef __EMSCRIPTEN__
+    (void)t;
+    return false;
+#else
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    std::string wav = t.path;
+    std::string ext = fs::path(t.path).extension().string();
+    for (auto& c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
+    if (ext != ".wav") {
+        const auto size = fs::file_size(t.path, ec);
+        const long long stamp = static_cast<long long>(fs::last_write_time(t.path, ec).time_since_epoch().count());
+        wav = cache_ + std::to_string(std::hash<std::string>{}(t.path + "|" + std::to_string(static_cast<unsigned long long>(size)) + "|" + std::to_string(stamp))) + ".wav";
+        if (!fs::exists(wav, ec)) {
+            const std::string tmp = wav + ".part";
+            std::string cmd;
+            if (std::system("command -v afconvert >/dev/null 2>&1") == 0)
+                cmd = "afconvert -f WAVE -d LEI16@44100 -c 2 " + shQuote(t.path) + " " + shQuote(tmp) + " >/dev/null 2>&1";
+            else if (std::system("command -v ffmpeg >/dev/null 2>&1") == 0)
+                cmd = "ffmpeg -loglevel error -y -i " + shQuote(t.path) + " -ac 2 -ar 44100 -c:a pcm_s16le -f wav " + shQuote(tmp) +
+                      " >/dev/null 2>&1";
+            if (cmd.empty() || std::system(cmd.c_str()) != 0) {
+                fs::remove(tmp, ec);
+                return false;
+            }
+            fs::rename(tmp, wav, ec);
+            if (ec) return false;
+        }
+    }
+    SDL_AudioSpec spec;
+    Uint8* buf = nullptr;
+    Uint32 len = 0;
+    if (!SDL_LoadWAV(wav.c_str(), &spec, &buf, &len)) return false;
+    SDL_AudioCVT cvt;
+    bool ok = false;
+    if (SDL_BuildAudioCVT(&cvt, spec.format, spec.channels, spec.freq, AUDIO_S16SYS, 2, 44100) >= 0) {
+        std::vector<Uint8> work(size_t(len) * size_t(std::max(1, cvt.len_mult)));
+        std::memcpy(work.data(), buf, len);
+        cvt.buf = work.data();
+        cvt.len = int(len);
+        if (cvt.needed == 0 || SDL_ConvertAudio(&cvt) == 0) {
+            const size_t bytes = cvt.needed ? size_t(cvt.len_cvt) : size_t(len);
+            t.sample.pcm16.resize(bytes / 2);
+            std::memcpy(t.sample.pcm16.data(), work.data(), (bytes / 4) * 4);
+            t.sample.data.clear();
+            t.sample.rate = 44100;
+            ok = t.sample.frames() > 1;
+        }
+    }
+    SDL_FreeWAV(buf);
+    return ok;
+#endif
 }
 
 }  // namespace rally

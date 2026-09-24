@@ -49,10 +49,13 @@ generated at boot. There are no asset files.
     snares and handclaps.
   - **94.7 KOOL** (rock & roll): a shuffled boogie bass, a honking sax, and
     pounding piano.
+  - **96.6 ARENA FM** (anthems): stabbed fight-anthem power chords, and a
+    synth-brass fanfare over a galloping bass.
+  - **YOUR MUSIC**: your own songs (see below).
 
   Stations keep playing while you listen elsewhere, so flipping back lands you
-  mid-song, and the music ducks when the co-driver speaks. All six songs are
-  original.
+  mid-song, and the music ducks when the co-driver speaks. All eight built-in
+  songs are original.
 - **FM sound with real grit.** The engine note follows the revs, and rival
   engines pass with Doppler.
 - **An arcade finish:** CRT scanlines, 4:3 output, a live course map and a rev
@@ -107,6 +110,17 @@ make
 | Radio station | Tab (or E) | Y |
 | Turbo boost (once unlocked) | Space | click either stick |
 | CRT scanlines · fullscreen · screenshot | F1 · F11 · F12 | |
+
+### Your music
+
+Drop your own songs into the music folder and they become a **YOUR MUSIC** station
+on the radio. WAV works everywhere. MP3, M4A/AAC, FLAC, AIFF and CAF are converted
+automatically on first play, with macOS's built-in `afconvert` or with `ffmpeg` if
+it's installed. Tracks play in file-name order, load in the background, duck under
+the co-driver, and resume where you left off when you tune back in. The game prints
+the folder on startup, and `./s3 --music-dir` shows it too. On macOS it's
+`~/Library/Application Support/macncrash/s3engine/music/`. Only music you have the
+right to play belongs there. The desktop build is required.
 
 ### Controllers
 
@@ -176,6 +190,7 @@ src/game/      rally (game, physics, AI, HUD) · stages · art · sound · radio
 ./s3 --sim --shots DIR      # plus PNG screenshots
 ./s3 --record V.raw A.raw   # scripted player, raw video + audio for ffmpeg
 ./s3 --radio DIR            # render each radio station to a WAV
+./s3 --music-test DIR       # check YOUR MUSIC loads, plays and advances with a folder
 ./s3 --versus-test [STAGE] [--discover]   # two consoles race over loopback UDP
 ```
 

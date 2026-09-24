@@ -37,7 +37,7 @@ const char* VOICE_TEXT[V_COUNT] = {
     "Over crest!", "Splash!", "Don't cut!", "Checkpoint!", "Extended play!", "Final lap!",
     "Game over. Yeah!", "Congratulations!", "Three", "Two", "One", "Go!", "Finish!", "You win!", "Maybe.",
     "Eighty-eight point one. The Blade!", "One oh one point five. Neon F.M.", "Ninety-four seven. Kool rock and roll!",
-    "Turbo!", "Secret unlocked. Turbo boost!",
+    "Turbo!", "Secret unlocked. Turbo boost!", "Ninety-six point six. Arena F.M.!",
 };
 
 // ------------------------------------------------------------------ stages

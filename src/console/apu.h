@@ -43,9 +43,13 @@ struct FMPatch {
     float echo = 0;       // send to the echo unit
 };
 
+// A PCM sample: mono float (effects, drums, speech) or interleaved 16-bit
+// stereo (full songs, which would be too large as float).
 struct Sample {
     std::vector<float> data;
+    std::vector<int16_t> pcm16;  // interleaved stereo; used when non-empty
     int rate = 22050;
+    size_t frames() const { return pcm16.empty() ? data.size() : pcm16.size() / 2; }
 };
 
 class APU {
@@ -66,7 +70,8 @@ public:
     void noise(float vol, float rate, bool periodic = false);
     void noiseBurst(float vol, float rate, float decay);  // one-shot
 
-    void play(int ch, const Sample* s, float vol = 1, float pitch = 1, float pan = 0);
+    void play(int ch, const Sample* s, float vol = 1, float pitch = 1, float pan = 0, double startSeconds = 0);
+    double position(int ch);  // seconds into the sample playing on a PCM channel
     bool playing(int ch);
     void setPcmGain(int ch, float gain);
     void setEcho(float seconds, float feedback, float wet);

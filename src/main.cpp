@@ -222,6 +222,39 @@ static int versusTest(int stage, bool discover) {
     return ok ? 0 : 1;
 }
 
+// YOUR MUSIC: point the radio at a folder, tune in, check tracks load, play
+// in stereo and advance.
+static int musicTest(const char* dir) {
+    gs::APU apu;
+    apu.init(48000);
+    rally::Radio radio(apu);
+    radio.loadUserMusic(std::string(dir) + "/", std::string(dir) + "/.cache/");
+    std::printf("music test: %zu tracks in %s\n", radio.userTracks(), dir);
+    if (!radio.userTracks()) return 1;
+    while (radio.station() != rally::USER_STATION && radio.next() != -1) {}
+    if (radio.station() != rally::USER_STATION) radio.next();
+    std::vector<float> buf(800 * 2);
+    std::string last;
+    int changes = 0;
+    double sum = 0;
+    long n = 0;
+    for (int f = 0; f < 60 * 120 && changes < 3; f++) {
+        radio.tick();
+        apu.render(buf.data(), 800);
+        for (float v : buf) sum += double(v) * v, n++;
+        const std::string line = radio.songLine();
+        if (line != last && line.rfind("LOADING", 0) != 0) {
+            std::printf("  now playing: %s\n", line.c_str());
+            last = line;
+            changes++;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    const double rms = std::sqrt(sum / std::max(1L, n));
+    std::printf("  rms %.3f  %s\n", rms, rms > 0.01 && changes >= 2 ? "MUSIC OK" : "MUSIC FAILED");
+    return rms > 0.01 && changes >= 2 ? 0 : 1;
+}
+
 int main(int argc, char** argv) {
     bool sim = false;
     const char* shots = nullptr;
@@ -235,6 +268,12 @@ int main(int argc, char** argv) {
             bool disc = false;
             for (int k = 1; k < argc; k++) disc |= !std::strcmp(argv[k], "--discover");
             return versusTest(st, disc);
+        }
+        else if (!std::strcmp(argv[i], "--music-test") && i + 1 < argc) return musicTest(argv[i + 1]);
+        else if (!std::strcmp(argv[i], "--music-dir")) {
+            gs::System s(true);
+            std::printf("%s\n", s.dataPath("music/").c_str());
+            return 0;
         }
         else if (!std::strcmp(argv[i], "--version")) {
             std::printf("S3 RALLY %s\n", S3_VERSION_STRING);

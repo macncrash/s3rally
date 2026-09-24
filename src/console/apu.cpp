@@ -116,14 +116,20 @@ void APU::noiseBurst(float vol, float rate, float decay) {
     noiseDecay_ = decay;
 }
 
-void APU::play(int ch, const Sample* s, float vol, float pitch, float pan) {
+void APU::play(int ch, const Sample* s, float vol, float pitch, float pan, double startSeconds) {
     if (ch < 0 || ch >= PCM_CHANNELS) return;
     std::lock_guard<std::mutex> l(m_);
-    pcm_[ch].s = (s && s->data.size() > 1) ? s : nullptr;
-    pcm_[ch].pos = 0;
+    pcm_[ch].s = (s && s->frames() > 1) ? s : nullptr;
+    pcm_[ch].pos = (s && startSeconds > 0) ? std::min(startSeconds * s->rate, double(s->frames() - 1)) : 0;
     pcm_[ch].vol = vol;
     pcm_[ch].pitch = pitch;
     pcm_[ch].pan = std::clamp(pan, -1.0f, 1.0f);
+}
+
+double APU::position(int ch) {
+    if (ch < 0 || ch >= PCM_CHANNELS) return 0;
+    std::lock_guard<std::mutex> l(m_);
+    return pcm_[ch].s ? pcm_[ch].pos / pcm_[ch].s->rate : 0;
 }
 
 bool APU::playing(int ch) {
@@ -270,16 +276,23 @@ void APU::render(float* out, int frames) {
         mono += noiseOut_ * std::max(noiseVol_, noiseCur_);
         for (auto& p : pcm_) {
             if (!p.s) continue;
-            const auto& d = p.s->data;
             size_t i = size_t(p.pos);
-            if (i + 1 >= d.size()) {
+            if (i + 1 >= p.s->frames()) {
                 p.s = nullptr;
                 continue;
             }
-            float fr = float(p.pos - i);
-            float v = (d[i] + (d[i + 1] - d[i]) * fr) * p.vol * p.gain;
-            L += v * (1 - std::max(0.0f, p.pan) * 0.8f);
-            R += v * (1 + std::min(0.0f, p.pan) * 0.8f);
+            const float fr = float(p.pos - i);
+            if (!p.s->pcm16.empty()) {  // stereo song
+                const int16_t* d = p.s->pcm16.data();
+                const float g = p.vol * p.gain / 32768.0f;
+                L += (d[i * 2] + (d[i * 2 + 2] - d[i * 2]) * fr) * g;
+                R += (d[i * 2 + 1] + (d[i * 2 + 3] - d[i * 2 + 1]) * fr) * g;
+            } else {
+                const auto& d = p.s->data;
+                float v = (d[i] + (d[i + 1] - d[i]) * fr) * p.vol * p.gain;
+                L += v * (1 - std::max(0.0f, p.pan) * 0.8f);
+                R += v * (1 + std::min(0.0f, p.pan) * 0.8f);
+            }
             p.pos += double(p.pitch) * p.s->rate / rate_;
         }
         L += mono;
