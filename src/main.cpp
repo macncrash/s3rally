@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -205,7 +206,9 @@ int main(int argc, char** argv) {
         radioCheck(nullptr, 30);
         return simulate(shots);
     }
-    gs::System sys;
-    rally::Rally cart;
-    return sys.run(cart);
+    // On the heap: the console carries a 286 KB framebuffer, far bigger than a
+    // WebAssembly stack. (Declared so the cart outlives the system board.)
+    auto cart = std::make_unique<rally::Rally>();
+    auto sys = std::make_unique<gs::System>();
+    return sys->run(*cart);
 }

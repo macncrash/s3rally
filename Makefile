@@ -25,7 +25,7 @@ sim: s3
 # WebAssembly build for browsers (needs Emscripten: em++ on PATH).
 web:
 	@mkdir -p build-web
-	em++ -std=c++17 -O2 -Isrc -sUSE_SDL=2 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=134217728 \
+	em++ -std=c++17 -O2 -Isrc -sUSE_SDL=2 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=134217728 -sSTACK_SIZE=1048576 \
 		-sENVIRONMENT=web --shell-file web/shell.html $(SRC) -o build-web/index.html
 
 clean:
