@@ -9,11 +9,13 @@
 #include "radio.h"
 #include "sound.h"
 #include "stages.h"
+#include "versus.h"
+#include "version.h"
 
 namespace rally {
 
-enum class Mode { Title, Secret, Menu, StageSelect, CarSelect, Intro, Countdown, Race, Pause, Over, Finish, Result, Ending };
-enum class GameType { Championship, Practice, TimeAttack };
+enum class Mode { Title, Secret, Menu, Lobby, Controls, StageSelect, CarSelect, Intro, Countdown, Race, Pause, Over, Finish, Result, Ending };
+enum class GameType { Championship, Practice, TimeAttack, Versus };
 
 struct Input {
     float steer = 0, throttle = 0, brake = 0;
@@ -24,6 +26,7 @@ struct Rival {
     float dist = 0, x = 0, lane = 0, speed = 0, top = 0;
     int pal = 0;
     const char* name = "";
+    bool remote = false;  // driven by the other player over the network, not by the AI
 };
 
 struct Particle {
@@ -38,7 +41,7 @@ struct StageResult {
 
 class Rally : public gs::Cart {
 public:
-    const char* title() const override { return "S3 RALLY"; }
+    const char* title() const override { return "S3 RALLY " S3_VERSION; }
     void init(gs::System& sys) override;
     void frame(gs::System& sys) override;
 
@@ -51,6 +54,17 @@ public:
     };
     SimReport simulateStage(int stage, std::vector<std::string>* shots, const std::string& shotDir);
     int tilesUsed() const { return tilesUsed_; }
+    // Head-to-head test hooks: skip the menus and host or join directly.
+    bool testHost(int stage, uint16_t port);
+    void testDiscoveryPort(uint16_t p) { versus_.discoveryPort = p; }
+    uint16_t testHostPort() const { return versus_.gamePort; }  // may differ if the first port was busy
+    bool testJoin(const std::string& ip, uint16_t port, int car);
+    struct VersusReport {
+        bool finished, peerSeen, peerFinished;
+        int rank;
+        float time, peerTime;
+    };
+    VersusReport versusReport() const;
     // What the autopilot would do right now (used by the demo recorder).
     Input botInput() { return autopilot(); }
     bool racing() const { return mode_ == Mode::Race; }
@@ -85,6 +99,14 @@ private:
     void drawMenus();
     void drawMap();
     void drawSecret();
+    void drawLobby();
+    void drawControls();
+    void updateLobby(bool confirm, bool back);
+    void updateControls(bool confirm, bool back);
+    void updateVersus();
+    void startVersusRace();
+    void padFeedback();
+    bool timed() const { return type_ == GameType::Championship || type_ == GameType::Practice; }
     void drawTurboFx();
     int fogFor(float dz) const;
     void spr(const gs::Mipped& m, float cx, float bottom, float h, int pal, bool flip, int fog, int clipY = 224, bool shadow = false);
@@ -115,6 +137,13 @@ private:
     bool manual_ = false;
     bool withRivals_ = true;
     bool dim_ = false;
+    Versus versus_;
+    int lobbyStep_ = 0, lobbySel_ = 0, ctlSel_ = 0;
+    bool rebinding_ = false;
+    std::string toast_;
+    int toastT_ = 0, padEvents_ = 0;
+    int ledColor_ = -1;
+    bool opponentLeft_ = false;
     bool turbo_ = false;  // unlocked by typing the secret code on the title screen
     int boosts_ = 0, boostT_ = 0;
 

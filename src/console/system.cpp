@@ -5,6 +5,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
 #include <vector>
 
 #include "gfx.h"
@@ -51,6 +54,9 @@ static int keyToButton(SDL_Keycode k) {
 System::System(bool hl) : headless(hl) {
     if (!headless) {
         SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+        // Rumble and light-bar support for PlayStation pads over USB and Bluetooth.
+        SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS4_RUMBLE, "1");
+        SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5_RUMBLE, "1");
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0)
             std::fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
     }
@@ -210,11 +216,9 @@ int System::run(Cart& cart) {
     apu.init(audioDev_ ? have.freq : 48000);
     if (audioDev_) SDL_PauseAudioDevice(audioDev_, 0);
 
-    for (int i = 0; i < SDL_NumJoysticks(); i++)
-        if (SDL_IsGameController(i)) {
-            ctl_ = SDL_GameControllerOpen(i);
-            break;
-        }
+    for (int i = 0; i < SDL_NumJoysticks() && !ctl_; i++)
+        if (SDL_IsGameController(i)) openController(i);
+    ctl.deserialize(loadBlob("controls.txt"));
 
     vdp.reset();
     biosInit();
@@ -292,39 +296,52 @@ void System::pollEvents() {
                 break;
             }
             case SDL_CONTROLLERDEVICEADDED:
-                if (!ctl_) ctl_ = SDL_GameControllerOpen(e.cdevice.which);
+                if (!ctl_) openController(e.cdevice.which);
                 break;
             case SDL_CONTROLLERDEVICEREMOVED:
                 if (ctl_ && e.cdevice.which == SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(ctl_))) {
                     SDL_GameControllerClose(ctl_);
                     ctl_ = nullptr;
+                    ctl.connected = false;
+                    ctl.events++;
                 }
+                break;
+            case SDL_CONTROLLERBUTTONDOWN:
+                ctl.lastPressed = e.cbutton.button;
                 break;
         }
     }
     std::fill(std::begin(pad.padBtn), std::end(pad.padBtn), false);
     pad.axisX = pad.accel = pad.brake = 0;
-    if (ctl_) {
-        auto b = [&](SDL_GameControllerButton x) { return SDL_GameControllerGetButton(ctl_, x) != 0; };
-        float ax = SDL_GameControllerGetAxis(ctl_, SDL_CONTROLLER_AXIS_LEFTX) / 32767.0f;
-        float ay = SDL_GameControllerGetAxis(ctl_, SDL_CONTROLLER_AXIS_LEFTY) / 32767.0f;
-        pad.accel = SDL_GameControllerGetAxis(ctl_, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) / 32767.0f;
-        pad.brake = SDL_GameControllerGetAxis(ctl_, SDL_CONTROLLER_AXIS_TRIGGERLEFT) / 32767.0f;
-        if (std::fabs(ax) > 0.12f) pad.axisX = std::clamp((ax - std::copysign(0.12f, ax)) / 0.88f, -1.0f, 1.0f);
-        pad.padBtn[BTN_UP] = b(SDL_CONTROLLER_BUTTON_DPAD_UP) || ay < -0.5f;
-        pad.padBtn[BTN_DOWN] = b(SDL_CONTROLLER_BUTTON_DPAD_DOWN) || ay > 0.5f;
-        pad.padBtn[BTN_LEFT] = b(SDL_CONTROLLER_BUTTON_DPAD_LEFT) || ax < -0.5f;
-        pad.padBtn[BTN_RIGHT] = b(SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || ax > 0.5f;
-        pad.padBtn[BTN_C] = b(SDL_CONTROLLER_BUTTON_A) || pad.accel > 0.5f;
-        pad.padBtn[BTN_B] = b(SDL_CONTROLLER_BUTTON_B) || pad.brake > 0.5f;
-        pad.padBtn[BTN_A] = b(SDL_CONTROLLER_BUTTON_X);
-        pad.padBtn[BTN_Z] = b(SDL_CONTROLLER_BUTTON_Y);
-        pad.padBtn[BTN_X] = b(SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
-        pad.padBtn[BTN_Y] = b(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
-        pad.padBtn[BTN_START] = b(SDL_CONTROLLER_BUTTON_START);
-        pad.padBtn[BTN_MODE] = b(SDL_CONTROLLER_BUTTON_BACK);
-        pad.padBtn[BTN_TURBO] = b(SDL_CONTROLLER_BUTTON_LEFTSTICK) || b(SDL_CONTROLLER_BUTTON_RIGHTSTICK);
+    ctl.anyDown = false;
+    if (!ctl_) return;
+    const float ax = SDL_GameControllerGetAxis(ctl_, SDL_CONTROLLER_AXIS_LEFTX) / 32767.0f;
+    const float ay = SDL_GameControllerGetAxis(ctl_, SDL_CONTROLLER_AXIS_LEFTY) / 32767.0f;
+    const float lt = SDL_GameControllerGetAxis(ctl_, SDL_CONTROLLER_AXIS_TRIGGERLEFT) / 32767.0f;
+    const float rt = SDL_GameControllerGetAxis(ctl_, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) / 32767.0f;
+    // Physical state, including the triggers as two extra "buttons".
+    bool phys[PHYS_COUNT] = {};
+    for (int i = 0; i < SDL_CONTROLLER_BUTTON_MAX && i < PHYS_LTRIGGER; i++)
+        phys[i] = SDL_GameControllerGetButton(ctl_, SDL_GameControllerButton(i)) != 0;
+    phys[PHYS_LTRIGGER] = lt > 0.5f;
+    phys[PHYS_RTRIGGER] = rt > 0.5f;
+    for (int t = 0; t < 2; t++) {  // triggers have no button events: report fresh pulls here
+        const bool on = phys[PHYS_LTRIGGER + t];
+        if (on && !trigWas_[t]) ctl.lastPressed = PHYS_LTRIGGER + t;
+        trigWas_[t] = on;
     }
+    for (int i = 0; i < PHYS_COUNT; i++) ctl.anyDown |= phys[i];
+    // Stick steering and directions are fixed; everything else goes through the map.
+    if (std::fabs(ax) > 0.12f) pad.axisX = std::clamp((ax - std::copysign(0.12f, ax)) / 0.88f, -1.0f, 1.0f);
+    pad.padBtn[BTN_UP] = ay < -0.5f;
+    pad.padBtn[BTN_DOWN] = ay > 0.5f;
+    pad.padBtn[BTN_LEFT] = ax < -0.5f;
+    pad.padBtn[BTN_RIGHT] = ax > 0.5f;
+    if (ctl.suppress) return;
+    pad.accel = rt;
+    pad.brake = lt;
+    for (int i = 0; i < PHYS_COUNT; i++)
+        if (phys[i] && ctl.map[i] >= 0 && ctl.map[i] < BTN_COUNT) pad.padBtn[ctl.map[i]] = true;
 }
 
 void System::present() {
@@ -353,6 +370,107 @@ void System::present() {
         }
     }
     SDL_RenderPresent(ren_);
+}
+
+// ---------------------------------------------------------------- controller
+
+void Controller::resetMap() {
+    for (auto& m : map) m = -1;
+    map[SDL_CONTROLLER_BUTTON_A] = BTN_C;              // accelerate (Cross)
+    map[SDL_CONTROLLER_BUTTON_B] = BTN_B;              // brake (Circle)
+    map[SDL_CONTROLLER_BUTTON_X] = BTN_TURBO;          // turbo (Square)
+    map[SDL_CONTROLLER_BUTTON_Y] = BTN_Z;              // radio (Triangle)
+    map[SDL_CONTROLLER_BUTTON_BACK] = BTN_MODE;        // back (Create / View)
+    map[SDL_CONTROLLER_BUTTON_START] = BTN_START;      // start / pause (Options / Menu)
+    map[SDL_CONTROLLER_BUTTON_LEFTSTICK] = BTN_TURBO;
+    map[SDL_CONTROLLER_BUTTON_RIGHTSTICK] = BTN_TURBO;
+    map[SDL_CONTROLLER_BUTTON_LEFTSHOULDER] = BTN_X;   // shift down
+    map[SDL_CONTROLLER_BUTTON_RIGHTSHOULDER] = BTN_Y;  // shift up
+    map[SDL_CONTROLLER_BUTTON_DPAD_UP] = BTN_UP;
+    map[SDL_CONTROLLER_BUTTON_DPAD_DOWN] = BTN_DOWN;
+    map[SDL_CONTROLLER_BUTTON_DPAD_LEFT] = BTN_LEFT;
+    map[SDL_CONTROLLER_BUTTON_DPAD_RIGHT] = BTN_RIGHT;
+    map[20] = BTN_Z;                                   // touchpad click: radio
+    map[PHYS_LTRIGGER] = BTN_B;
+    map[PHYS_RTRIGGER] = BTN_C;
+}
+
+const char* Controller::physName(int phys) const {
+    static const char* ps[PHYS_COUNT] = {"CROSS", "CIRCLE", "SQUARE", "TRIANGLE", "CREATE", "PS", "OPTIONS", "L3", "R3", "L1", "R1",
+                                         "UP", "DOWN", "LEFT", "RIGHT", "MUTE", "P1", "P2", "P3", "P4", "TPAD", "L2", "R2"};
+    static const char* xb[PHYS_COUNT] = {"A", "B", "X", "Y", "VIEW", "GUIDE", "MENU", "LS", "RS", "LB", "RB",
+                                         "UP", "DOWN", "LEFT", "RIGHT", "SHARE", "P1", "P2", "P3", "P4", "TPAD", "LT", "RT"};
+    if (phys < 0 || phys >= PHYS_COUNT) return "?";
+    if (type == PAD_PS4 && phys == 4) return "SHARE";
+    return (type == PAD_PS4 || type == PAD_PS5) ? ps[phys] : xb[phys];
+}
+
+std::string Controller::serialize() const {
+    std::string s;
+    for (int i = 0; i < PHYS_COUNT; i++) s += std::to_string(map[i]) + (i + 1 < PHYS_COUNT ? " " : "\n");
+    return s;
+}
+
+void Controller::deserialize(const std::string& s) {
+    int8_t m[PHYS_COUNT];
+    size_t pos = 0;
+    for (int i = 0; i < PHYS_COUNT; i++) {
+        char* end = nullptr;
+        long v = std::strtol(s.c_str() + pos, &end, 10);
+        if (end == s.c_str() + pos || v < -1 || v >= BTN_COUNT) return;  // missing or corrupt: keep defaults
+        m[i] = int8_t(v);
+        pos = size_t(end - s.c_str());
+    }
+    std::copy(std::begin(m), std::end(m), std::begin(map));
+}
+
+void System::openController(int index) {
+    ctl_ = SDL_GameControllerOpen(index);
+    if (!ctl_) return;
+    const char* n = SDL_GameControllerName(ctl_);
+    ctl.name = n ? n : "CONTROLLER";
+    switch (SDL_GameControllerGetType(ctl_)) {
+        case SDL_CONTROLLER_TYPE_PS4: ctl.type = PAD_PS4; break;
+        case SDL_CONTROLLER_TYPE_PS5: ctl.type = PAD_PS5; break;
+        case SDL_CONTROLLER_TYPE_XBOX360:
+        case SDL_CONTROLLER_TYPE_XBOXONE: ctl.type = PAD_XBOX; break;
+        case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_PRO: ctl.type = PAD_SWITCH; break;
+        default: ctl.type = PAD_OTHER; break;
+    }
+    ctl.connected = true;
+    ctl.events++;
+}
+
+void System::rumble(float low, float high, int ms) {
+    if (!ctl_) return;
+    auto u16 = [](float v) { return Uint16(std::clamp(v, 0.0f, 1.0f) * 65535); };
+    SDL_GameControllerRumble(ctl_, u16(low), u16(high), Uint32(std::max(0, ms)));
+}
+
+void System::setLight(int r, int g, int b) {
+    if (ctl_) SDL_GameControllerSetLED(ctl_, Uint8(r), Uint8(g), Uint8(b));
+}
+
+std::string System::loadBlob(const std::string& name) const {
+#ifdef __EMSCRIPTEN__
+    std::string js = "localStorage.getItem('gensys-" + name + "') || ''";
+    const char* v = emscripten_run_script_string(js.c_str());
+    return v ? v : "";
+#else
+    std::ifstream f(dataPath(name));
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+#endif
+}
+
+void System::saveBlob(const std::string& name, const std::string& data) const {
+    if (headless) return;
+#ifdef __EMSCRIPTEN__
+    EM_ASM({ try { localStorage.setItem('gensys-' + UTF8ToString($0), UTF8ToString($1)); } catch (e) {} }, name.c_str(), data.c_str());
+#else
+    std::ofstream(dataPath(name)) << data;
+#endif
 }
 
 // ---------------------------------------------------------------- boot ROM

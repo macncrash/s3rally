@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cctype>
 #include <cstring>
 #include <fstream>
 #include <sstream>
@@ -96,12 +97,7 @@ void Rally::setStage(int s) {
 }
 
 void Rally::loadRecords() {
-#ifdef __EMSCRIPTEN__
-    // In a browser, records live in the page's localStorage.
-    std::istringstream f(emscripten_run_script_string("localStorage.getItem('gensys-records') || ''"));
-#else
-    std::ifstream f(sys_->dataPath("records.txt"));
-#endif
+    std::istringstream f(sys_->loadBlob("records.txt"));  // a file on desktop, localStorage on the web
     int s;
     float lap, race;
     while (f >> s >> lap >> race)
@@ -115,14 +111,12 @@ void Rally::saveRecords() {
     if (sys_->headless) return;
     std::ostringstream f;
     for (int s = 0; s < NUM_STAGES; s++) f << s << ' ' << recLap_[s] << ' ' << recRace_[s] << '\n';
-#ifdef __EMSCRIPTEN__
-    EM_ASM({ try { localStorage.setItem('gensys-records', UTF8ToString($0)); } catch (e) {} }, f.str().c_str());
-#else
-    std::ofstream(sys_->dataPath("records.txt")) << f.str();
-#endif
+    sys_->saveBlob("records.txt", f.str());
 }
 
 void Rally::toTitle() {
+    versus_.stop();
+    if (type_ == GameType::Versus) type_ = GameType::Championship;
     mode_ = Mode::Title;
     t_ = 0;
     startRank_ = 16;
@@ -140,6 +134,7 @@ void Rally::toTitle() {
 void Rally::startStage(int stage, bool withRivals) {
     setStage(stage);
     setCarPalette(*vdp_, PAL_PLAYER, carId_);
+    setRivalPalettes(*vdp_);  // a versus race borrows one for the opponent's livery
     const StageDef& def = stageDef(stage);
     withRivals_ = withRivals;
     dist_ = track_.length - 3 * SEG;
@@ -250,24 +245,39 @@ void Rally::frame(gs::System& sys) {
         case Mode::Menu:
             dim_ = true;
             drive(autopilot(), true);
-            if (pad.pressed(gs::BTN_UP)) { menuSel_ = (menuSel_ + 3) % 4; sfx_->menuMove(); }
-            if (pad.pressed(gs::BTN_DOWN)) { menuSel_ = (menuSel_ + 1) % 4; sfx_->menuMove(); }
+            if (pad.pressed(gs::BTN_UP)) { menuSel_ = (menuSel_ + 5) % 6; sfx_->menuMove(); }
+            if (pad.pressed(gs::BTN_DOWN)) { menuSel_ = (menuSel_ + 1) % 6; sfx_->menuMove(); }
             if (back) { mode_ = Mode::Title; t_ = 31; }
             else if (confirm && t_ > 5) {
                 sfx_->menuSelect();
-                if (menuSel_ == 3) {
-                    tuneRadio();
-                } else {
-                    type_ = menuSel_ == 0 ? GameType::Championship : menuSel_ == 1 ? GameType::Practice : GameType::TimeAttack;
-                    t_ = 0;
-                    if (type_ == GameType::Championship) {
-                        mode_ = Mode::CarSelect;
-                    } else {
-                        mode_ = Mode::StageSelect;
-                        menuSel_ = stage_;
-                    }
+                switch (menuSel_) {
+                    case 0: type_ = GameType::Championship; mode_ = Mode::CarSelect; t_ = 0; break;
+                    case 1: type_ = GameType::Practice; mode_ = Mode::StageSelect; t_ = 0; break;
+                    case 2: type_ = GameType::TimeAttack; mode_ = Mode::StageSelect; t_ = 0; break;
+                    case 3:
+                        if (!Versus::available()) {
+                            toast_ = "LAN PLAY NEEDS THE DESKTOP VERSION";
+                            toastT_ = 180;
+                        } else {
+                            type_ = GameType::Versus;
+                            mode_ = Mode::CarSelect;
+                            t_ = 0;
+                        }
+                        break;
+                    case 4: mode_ = Mode::Controls; ctlSel_ = 0; t_ = 0; break;
+                    default: tuneRadio(); break;
                 }
             }
+            break;
+        case Mode::Lobby:
+            dim_ = true;
+            drive(autopilot(), true);
+            updateLobby(confirm, back);
+            break;
+        case Mode::Controls:
+            dim_ = true;
+            drive(autopilot(), true);
+            updateControls(confirm, back);
             break;
         case Mode::StageSelect:
             dim_ = true;
@@ -287,8 +297,13 @@ void Rally::frame(gs::System& sys) {
             drive(autopilot(), true);
             if (pad.pressed(gs::BTN_LEFT) || pad.pressed(gs::BTN_RIGHT)) { carId_ = (carId_ + 1) % NUM_CARS; sfx_->menuMove(); }
             if (pad.pressed(gs::BTN_UP) || pad.pressed(gs::BTN_DOWN)) { manual_ = !manual_; sfx_->menuMove(); }
-            if (back) { mode_ = type_ == GameType::Championship ? Mode::Menu : Mode::StageSelect; t_ = 0; }
-            else if (confirm && t_ > 5) {
+            if (back) { mode_ = type_ == GameType::Championship || type_ == GameType::Versus ? Mode::Menu : Mode::StageSelect; t_ = 0; }
+            else if (confirm && t_ > 5 && type_ == GameType::Versus) {
+                sfx_->menuSelect();
+                mode_ = Mode::Lobby;
+                lobbyStep_ = lobbySel_ = 0;
+                t_ = 0;
+            } else if (confirm && t_ > 5) {
                 sfx_->menuSelect();
                 startRank_ = 16;
                 champ_.clear();
@@ -317,27 +332,28 @@ void Rally::frame(gs::System& sys) {
             break;
         }
         case Mode::Race:
-            if (pad.pressed(gs::BTN_START)) {
+            if (pad.pressed(gs::BTN_START) && type_ != GameType::Versus) {  // no pausing a network race
                 mode_ = Mode::Pause;
                 sys.apu.setMaster(0.25f);
                 break;
             }
-            if (type_ != GameType::TimeAttack) timer_ -= DT;
+            if (timed()) timer_ -= DT;
             raceTime_ += DT;
             lapTime_ += DT;
             minTimer_ = std::min(minTimer_, timer_);
-            if (type_ != GameType::TimeAttack && timer_ <= 5 && std::ceil(timer_) != std::ceil(timer_ + DT)) sfx_->beep(false);
+            if (timed() && timer_ <= 5 && std::ceil(timer_) != std::ceil(timer_ + DT)) sfx_->beep(false);
             if (turbo_ && pad.pressed(gs::BTN_TURBO) && boosts_ > 0 && boostT_ == 0) {
                 boosts_--;
                 boostT_ = 150;
                 shake_ = 6;
                 sfx_->turbo();
+                sys.rumble(0.3f, 1.0f, 500);
                 voice_->say(V_TURBO, true);
                 say({"TURBO!"}, 50, PAL_RED);
             }
             if (boostT_ > 0) boostT_--;
             drive(readPad(), false);
-            if (timer_ <= 0 && mode_ == Mode::Race) gameOver();
+            if (timed() && timer_ <= 0 && mode_ == Mode::Race) gameOver();
             break;
         case Mode::Pause:
             if (pad.pressed(gs::BTN_START)) {
@@ -377,10 +393,13 @@ void Rally::frame(gs::System& sys) {
             break;
     }
 
+    updateVersus();
     if (mode_ != Mode::Pause) {
         updateRivals();
         updateParticles();
     }
+    padFeedback();
+    if (toastT_ > 0) toastT_--;
     updateSound();
     radio_->duck(voice_->speaking());  // turn the radio down while the co-driver talks
     radio_->tick();
@@ -425,6 +444,11 @@ void Rally::gameOver() {
 }
 
 void Rally::afterResult() {
+    if (type_ == GameType::Versus) {
+        versus_.stop();
+        toTitle();
+        return;
+    }
     if (type_ == GameType::Championship) {
         startRank_ = rank_;
         if (stage_ < 2 || (stage_ == 2 && rank_ == 1)) {
@@ -552,6 +576,8 @@ void Rally::drive(const Input& in, bool attract) {
                 crashCool_ = 30;
                 shake_ = hard ? 14.0f : 5.0f;
                 sfx_->crash(hard && !soft);
+                if (hard && !soft) sys_->rumble(0.9f, 0.9f, 350);
+                else sys_->rumble(0.5f, 0.6f, 180);
                 for (int i = 0; i < 10; i++)
                     parts_.push_back({HALF + (std::rand() % 80 - 40), 200, (std::rand() % 100 - 50) / 25.0f, -(std::rand() % 100) / 40.0f, 10, 0.6f, 0, 30, 1});
             } else if (!info.solid) {
@@ -565,18 +591,20 @@ void Rally::drive(const Input& in, bool attract) {
         float dz = mod(r.dist - dist_, track_.length);
         if (dz > track_.length / 2) dz -= track_.length;
         if (std::fabs(dz) < 400 && std::fabs(r.x - x_) < 0.58f) {
+            // A remote car is steered by its own player: only our car reacts to the contact.
             if (dz > 0 && speed_ > r.speed) {
                 speed_ = r.speed * 0.85f;
-                r.speed = std::min(MAX, r.speed + MAX * 0.05f);
+                if (!r.remote) r.speed = std::min(MAX, r.speed + MAX * 0.05f);
             } else if (dz <= 0 && r.speed > speed_) {
-                r.speed = speed_ * 0.9f;
+                if (!r.remote) r.speed = speed_ * 0.9f;
                 speed_ += MAX * 0.03f;
             }
             float push = (x_ >= r.x ? 1.0f : -1.0f) * 0.04f;
             x_ += push;
-            r.x -= push;
+            if (!r.remote) r.x -= push;
             if (crashCool_ == 0 && !attract) {
                 sfx_->bump();
+                sys_->rumble(0.4f, 0.4f, 120);
                 shake_ = 4;
                 crashCool_ = 12;
             }
@@ -647,7 +675,7 @@ void Rally::checkCrossings(float a, float b, bool attract) {
             if (lap_ == 1) continue;
         }
         extends_++;
-        if (type_ != GameType::TimeAttack) timer_ += def.extend - std::min(3, extends_ / 2);
+        if (timed()) timer_ += def.extend - std::min(3, extends_ / 2);
         sfx_->checkpoint();
         if (lap_ == def.laps && cp == track_.checkpoints.begin()) {
             say({"FINAL LAP", "EXTENDED PLAY!"}, 150);
@@ -663,6 +691,7 @@ void Rally::updateRivals() {
     if (rivals_.empty()) return;
     const bool moving = mode_ != Mode::Countdown && mode_ != Mode::Intro;
     for (Rival& r : rivals_) {
+        if (r.remote) continue;  // positioned by updateVersus()
         const Segment& seg = segAt(r.dist);
         float worst = 0;
         for (int k = 2; k <= 10; k += 4) worst = std::max(worst, std::fabs(segAt(r.dist + k * SEG).curve));
@@ -1028,11 +1057,16 @@ void Rally::drawHud() {
     if (!msg_.empty() && mode_ != Mode::Result && mode_ != Mode::Ending) {
         for (size_t i = 0; i < msg_.size(); i++) text(msg_[i], HALF, 58 + i * 22.0f, i == 0 ? 1.7f : 1.25f, msgPal_);
     }
+    if (toastT_ > 0 && !toast_.empty()) {  // notices: controller connected, errors
+        const std::string t = toast_.substr(0, 38);
+        hud(20 - int(t.size()) / 2, 26, t, PAL_YELLOW);
+        for (int i = -1; i <= 1; i++) spr(art_.panelWide, HALF + i * 100.0f, 28 * 8.0f + 3, 25, 0, false, 0, 224, true);
+    }
     drawTurboFx();
     const bool racing = mode_ == Mode::Countdown || mode_ == Mode::Race || mode_ == Mode::Pause || mode_ == Mode::Over ||
                         mode_ == Mode::Finish;
     if (!racing) {
-        if (mode_ != Mode::CarSelect && mode_ != Mode::Result && mode_ != Mode::Ending) drawRadio(23);
+        if (mode_ == Mode::Title || mode_ == Mode::Secret || mode_ == Mode::StageSelect || mode_ == Mode::Intro) drawRadio(23);
         return;
     }
     drawRadio(12);
@@ -1049,16 +1083,18 @@ void Rally::drawHud() {
         text("PAUSE", HALF, 70, 2, PAL_HUD);
         hud(11, 15, "START  RESUME", PAL_HUD);
         hud(11, 17, "MODE   QUIT", PAL_HUD);
+        hud(20 - int(std::strlen(S3_VERSION_STRING)) / 2, 20, S3_VERSION_STRING, PAL_HUD);
     }
 
     // Top row.
-    if (type_ != GameType::TimeAttack) {
+    if (timed()) {
         hud(18, 1, "TIME", PAL_YELLOW);
         const int secs = std::max(0, int(std::ceil(timer_)));
         const bool low = secs <= 10 && mode_ == Mode::Race;
         if (!low || frameNo_ % 30 < 20) text(std::to_string(secs), HALF, 14, 2.2f, low ? PAL_RED : PAL_YELLOW);
     } else {
-        hud(16, 1, "TIME ATTACK", PAL_YELLOW);
+        const char* label = type_ == GameType::Versus ? "HEAD TO HEAD" : "TIME ATTACK";
+        hud(20 - int(std::strlen(label)) / 2, 1, label, PAL_YELLOW);
         text(fmtTime(raceTime_), HALF, 14, 1.3f, PAL_HUD);
     }
     hud(2, 1, "LAP", PAL_YELLOW);
@@ -1067,7 +1103,7 @@ void Rally::drawHud() {
         hud(34, 1, "POS", PAL_YELLOW);
         std::string r = std::to_string(rank_);
         text(r, 302, 12, 2, PAL_HUD, 1);
-        hud(36, 4, "/16", PAL_HUD);
+        hud(36, 4, "/" + std::to_string(rivals_.size() + 1), PAL_HUD);
     }
     hud(2, 5, fmtTime(lapTime_), PAL_HUD);
 
@@ -1099,8 +1135,9 @@ void Rally::drawMenus() {
     switch (mode_) {
         case Mode::Title: {
             spr(art_.logo, HALF, 118, 104, PAL_LOGO, false, 0);
-            if (turbo_ && frameNo_ % 40 < 30) hud(13, 27, "TURBO ENABLED", PAL_RED);
+            if (turbo_ && frameNo_ % 40 < 30) hud(1, 27, "TURBO ENABLED", PAL_RED);
             if (frameNo_ % 60 < 40) text("PRESS START", HALF, 152, 1.5f, PAL_YELLOW);
+            hud(39 - int(std::strlen(S3_VERSION_STRING)), 27, S3_VERSION_STRING, PAL_HUD);
             if (radio_->cardFrames() <= 0) {  // the station card uses this space while it shows
                 hud(10, 25, "(C) 2026 MACNCRASH", PAL_HUD);
                 hud(12, 26, "S3-16 SYSTEM", PAL_HUD);
@@ -1110,13 +1147,22 @@ void Rally::drawMenus() {
         case Mode::Secret:
             drawSecret();
             break;
+        case Mode::Lobby:
+            drawLobby();
+            break;
+        case Mode::Controls:
+            drawControls();
+            break;
         case Mode::Menu: {
-            spr(art_.logo, HALF, 80, 64, PAL_LOGO, false, 0);
-            const char* items[4] = {"CHAMPIONSHIP", "PRACTICE", "TIME ATTACK", radio_->station() < 0 ? "RADIO  OFF" : "RADIO  ON"};
-            for (int i = 0; i < 4; i++)
-                text(items[i], HALF, 96 + i * 24.0f, 1.3f, i == menuSel_ ? PAL_YELLOW : PAL_HUD);
-            text(">", 50, 96 + menuSel_ * 24.0f, 1.3f, PAL_YELLOW, -1);
-            const char* help[4] = {"3 STAGES AND A SECRET ONE.", "RACE ANY STAGE.", "SOLO. NO TIME LIMIT.", "CHANGE STATION. TAB IN GAME."};
+            spr(art_.logo, HALF, 70, 56, PAL_LOGO, false, 0);
+            const char* items[6] = {"CHAMPIONSHIP", "PRACTICE", "TIME ATTACK", "HEAD TO HEAD", "CONTROLS",
+                                    radio_->station() < 0 ? "RADIO  OFF" : "RADIO  ON"};
+            for (int i = 0; i < 6; i++) text(items[i], HALF, 80 + i * 20.0f, 1.1f, i == menuSel_ ? PAL_YELLOW : PAL_HUD);
+            text(">", 58, 80 + menuSel_ * 20.0f, 1.1f, PAL_YELLOW, -1);
+            const char* help[6] = {"3 STAGES AND A SECRET ONE.", "RACE ANY STAGE.", "SOLO. NO TIME LIMIT.",
+                                   Versus::available() ? "RACE A FRIEND ON YOUR NETWORK." : "LAN PLAY NEEDS THE DESKTOP VERSION.",
+                                   "SEE AND REMAP BUTTONS.", "CHANGE STATION. TAB IN GAME."};
+            hud(39 - int(std::strlen(S3_VERSION_STRING)), 27, S3_VERSION_STRING, PAL_HUD);
             hud(20 - int(std::string(help[menuSel_]).size()) / 2, 25, help[menuSel_], PAL_HUD);
             break;
         }
@@ -1163,8 +1209,15 @@ void Rally::drawMenus() {
             break;
         }
         case Mode::Result: {
-            text(withRivals_ ? (rank_ == 1 ? "YOU WIN!" : "STAGE CLEAR") : "FINISH", HALF, 30, 2, PAL_YELLOW);
-            if (withRivals_) text("POSITION " + ordinal(rank_), HALF, 70, 1.5f, PAL_HUD);
+            if (type_ == GameType::Versus) {
+                text(rank_ == 1 ? "YOU WIN!" : "YOU LOSE", HALF, 30, 2, rank_ == 1 ? PAL_YELLOW : PAL_RED);
+                const CarState& p = versus_.peer;
+                hud(9, 11, "YOU       " + fmtTime(raceTime_), PAL_YELLOW);
+                hud(9, 12, "OPPONENT  " + (opponentLeft_ && !p.finished ? std::string("LEFT") : p.finished ? fmtTime(p.time) : std::string("RACING...")), PAL_HUD);
+            } else {
+                text(withRivals_ ? (rank_ == 1 ? "YOU WIN!" : "STAGE CLEAR") : "FINISH", HALF, 30, 2, PAL_YELLOW);
+                if (withRivals_) text("POSITION " + ordinal(rank_), HALF, 70, 1.5f, PAL_HUD);
+            }
             hud(9, 14, "RACE TIME " + fmtTime(raceTime_), PAL_HUD);
             hud(9, 16, "BEST LAP  " + fmtTime(bestLap_), PAL_HUD);
             if (newRecord_ && frameNo_ % 40 < 28) text("NEW RECORD!", HALF, 146, 1.3f, PAL_RED);
@@ -1228,6 +1281,347 @@ void Rally::drawSecret() {
         text(std::string(1, msg[i]), x, y, 1.2f, cycle[(i / 4) % 3], -1);
     }
     if (t_ > 60 && frameNo_ % 60 < 40) hud(14, 14, "PRESS START", PAL_YELLOW);
+}
+
+// ================================================================ head to head
+
+// Lobby steps: 0 choose host/join, 1 host picks a stage, 2 host waits,
+// 3 join browses games, 4 joining, 5 connected and about to start.
+void Rally::updateLobby(bool confirm, bool back) {
+    const gs::Pad& pad = sys_->pad;
+    auto fail = [&](const char* why) {
+        versus_.stop();
+        toast_ = why;
+        toastT_ = 200;
+        lobbyStep_ = 0;
+        t_ = 0;
+    };
+    switch (lobbyStep_) {
+        case 0:
+            if (pad.pressed(gs::BTN_UP) || pad.pressed(gs::BTN_DOWN)) { lobbySel_ ^= 1; sfx_->menuMove(); }
+            if (back) { mode_ = Mode::Menu; t_ = 0; }
+            else if (confirm && t_ > 5) {
+                sfx_->menuSelect();
+                t_ = 0;
+                if (lobbySel_ == 0) lobbyStep_ = 1;
+                else if (versus_.search()) { lobbyStep_ = 3; lobbySel_ = 0; }
+                else fail("COULD NOT OPEN THE NETWORK");
+            }
+            break;
+        case 1:
+            if (pad.pressed(gs::BTN_LEFT) || pad.pressed(gs::BTN_RIGHT)) {
+                int s = (stage_ + (pad.pressed(gs::BTN_LEFT) ? NUM_STAGES - 1 : 1)) % NUM_STAGES;
+                startStage(s, true);
+                dist_ += SEG * 30;
+                speed_ = MAX * 0.7f;
+                sfx_->menuMove();
+            }
+            if (back) { lobbyStep_ = 0; t_ = 0; }
+            else if (confirm && t_ > 5) {
+                sfx_->menuSelect();
+                if (versus_.host(stage_, carId_)) { lobbyStep_ = 2; t_ = 0; }
+                else fail("COULD NOT OPEN THE NETWORK");
+            }
+            break;
+        case 2:
+            if (back) { versus_.stop(); lobbyStep_ = 1; t_ = 0; }
+            else if (versus_.connected()) { sfx_->checkpoint(); lobbyStep_ = 5; t_ = 0; }
+            break;
+        case 3: {
+            const int n = int(versus_.hosts.size());
+            if (n) {
+                if (pad.pressed(gs::BTN_UP)) { lobbySel_ = (lobbySel_ + n - 1) % n; sfx_->menuMove(); }
+                if (pad.pressed(gs::BTN_DOWN)) { lobbySel_ = (lobbySel_ + 1) % n; sfx_->menuMove(); }
+                lobbySel_ = std::min(lobbySel_, n - 1);
+            }
+            if (back) { versus_.stop(); lobbyStep_ = 0; t_ = 0; }
+            else if (confirm && t_ > 5 && n) {
+                sfx_->menuSelect();
+                versus_.join(versus_.hosts[size_t(lobbySel_)].addr, carId_);
+                lobbyStep_ = 4;
+                t_ = 0;
+            }
+            break;
+        }
+        case 4:
+            if (back) { versus_.stop(); lobbyStep_ = 0; t_ = 0; }
+            else if (versus_.connected()) { sfx_->checkpoint(); lobbyStep_ = 5; t_ = 0; }
+            else if (versus_.phase == Versus::Phase::Lost) fail("NO ANSWER FROM THAT GAME");
+            break;
+        case 5:
+            if (versus_.phase == Versus::Phase::Lost) fail("OPPONENT LEFT");
+            else if (versus_.isHost && t_ == 90) {  // give both players a moment to see who they're racing
+                versus_.sendGo();
+                startVersusRace();
+            } else if (!versus_.isHost && versus_.takeGo()) {
+                startVersusRace();
+            }
+            break;
+    }
+}
+
+void Rally::startVersusRace() {
+    type_ = GameType::Versus;
+    startStage(versus_.stage, false);  // no AI field: just the two of you
+    withRivals_ = true;
+    x_ = versus_.isHost ? -0.4f : 0.4f;
+    Rival r;
+    r.remote = true;
+    r.dist = dist_;
+    r.x = r.lane = -x_;
+    r.top = 1;
+    r.pal = NUM_RIVAL_PALS - 1;
+    r.name = "OPPONENT";
+    rivals_.push_back(r);
+    setCarPalette(*vdp_, PAL_RIVAL + r.pal, versus_.peer.car);  // their car, their livery
+    rank_ = versus_.isHost ? 1 : 2;
+    opponentLeft_ = false;
+    beginCountdown();
+}
+
+// Every frame: pump the network, send our car, place theirs.
+void Rally::updateVersus() {
+    if (versus_.phase == Versus::Phase::Idle) return;
+    versus_.tick();
+    if (versus_.connected()) {
+        CarState me;
+        me.dist = dist_;
+        me.x = x_;
+        me.speed = speed_;
+        me.yaw = yaw_;
+        me.time = raceTime_;
+        me.lap = lap_;
+        me.car = carId_;
+        me.finished = mode_ == Mode::Finish || mode_ == Mode::Result;
+        versus_.sendState(me);
+    }
+    if (type_ != GameType::Versus || rivals_.empty() || !rivals_[0].remote) return;
+    Rival& r = rivals_[0];
+    const CarState& p = versus_.peer;
+    if (versus_.peerSeen && versus_.phase == Versus::Phase::Ready) {
+        // Extrapolate from the last update so the car keeps moving between packets.
+        const int age = std::min(versus_.framesSincePeer, 30);
+        r.dist = p.dist + p.speed * DT * age;
+        r.x = p.x;
+        r.speed = p.speed;
+    }
+    if (versus_.phase == Versus::Phase::Lost && !opponentLeft_) {
+        opponentLeft_ = true;
+        say({"OPPONENT LEFT"}, 150, PAL_RED);
+    }
+}
+
+void Rally::drawLobby() {
+    text("HEAD TO HEAD", HALF, 16, 1.5f, PAL_YELLOW);
+    const std::string ip = gs::Link::localAddress();
+    switch (lobbyStep_) {
+        case 0:
+            text("HOST A GAME", HALF, 84, 1.3f, lobbySel_ == 0 ? PAL_YELLOW : PAL_HUD);
+            text("JOIN A GAME", HALF, 110, 1.3f, lobbySel_ == 1 ? PAL_YELLOW : PAL_HUD);
+            text(">", 64, 84 + lobbySel_ * 26.0f, 1.3f, PAL_YELLOW, -1);
+            hud(7, 22, "BOTH PLAYERS ON THE SAME NETWORK", PAL_HUD);
+            break;
+        case 1: {
+            const StageDef& def = stageDef(stage_);
+            hud(14, 7, "CHOOSE STAGE", PAL_HUD);
+            text(std::string("< ") + def.name + " >", HALF, 80, 2, PAL_HUD);
+            hud(20 - int(std::strlen(def.subtitle)) / 2, 15, def.subtitle, PAL_YELLOW);
+            break;
+        }
+        case 2:
+            hud(10, 8, "WAITING FOR A RIVAL", frameNo_ % 60 < 40 ? PAL_YELLOW : PAL_HUD);
+            hud(20 - int(std::strlen(stageDef(stage_).name)) / 2, 11, stageDef(stage_).name, PAL_HUD);
+            if (!ip.empty()) hud(20 - int(ip.size() + 9) / 2, 14, "YOUR IP  " + ip, PAL_HUD);
+            hud(8, 22, "ON THE OTHER MACHINE CHOOSE", PAL_HUD);
+            hud(8, 23, "HEAD TO HEAD - JOIN A GAME", PAL_YELLOW);
+            break;
+        case 3: {
+            hud(11, 6, "GAMES ON YOUR NETWORK", PAL_HUD);
+            if (versus_.hosts.empty()) hud(12, 12, "SEARCHING...", frameNo_ % 60 < 40 ? PAL_YELLOW : PAL_HUD);
+            for (size_t i = 0; i < versus_.hosts.size() && i < 8; i++) {
+                const HostInfo& h = versus_.hosts[i];
+                std::string line = h.addr.str() + "  " + stageDef(h.stage).name;
+                if (h.version != S3_VERSION) line += "  V" + h.version;
+                hud(6, 9 + int(i) * 2, (int(i) == lobbySel_ ? "> " : "  ") + line, int(i) == lobbySel_ ? PAL_YELLOW : PAL_HUD);
+            }
+            break;
+        }
+        case 4:
+            hud(13, 12, "CONNECTING...", frameNo_ % 60 < 40 ? PAL_YELLOW : PAL_HUD);
+            break;
+        case 5:
+            text("RIVAL FOUND!", HALF, 70, 1.5f, PAL_YELLOW);
+            hud(20 - int(std::strlen(stageDef(versus_.stage).name)) / 2, 14, stageDef(versus_.stage).name, PAL_HUD);
+            hud(20 - int(std::strlen(carSpec(versus_.peer.car).name)) / 2, 16, carSpec(versus_.peer.car).name, PAL_HUD);
+            break;
+    }
+    if (lobbyStep_ != 5) hud(8, 26, "ENTER SELECT   ESC BACK", PAL_HUD);
+}
+
+// ================================================================ controls
+
+namespace {
+struct ActionDef {
+    const char* label;
+    gs::Button button;
+    const char* keys;
+};
+const ActionDef ACTIONS[] = {
+    {"ACCELERATE", gs::BTN_C, "C  UP"},       {"BRAKE", gs::BTN_B, "X  DOWN"},     {"TURBO", gs::BTN_TURBO, "SPACE"},
+    {"RADIO", gs::BTN_Z, "TAB  E"},           {"SHIFT UP", gs::BTN_Y, "W"},        {"SHIFT DOWN", gs::BTN_X, "Q"},
+    {"START/PAUSE", gs::BTN_START, "ENTER"}, {"BACK", gs::BTN_MODE, "ESC"},
+};
+constexpr int NUM_ACTIONS = int(sizeof ACTIONS / sizeof ACTIONS[0]);
+constexpr int CTL_ROWS = NUM_ACTIONS + 2;  // + reset + done
+bool isDpad(int phys) { return phys >= 11 && phys <= 14; }
+}  // namespace
+
+void Rally::updateControls(bool confirm, bool back) {
+    gs::Controller& c = sys_->ctl;
+    const gs::Pad& pad = sys_->pad;
+    if (rebinding_) {
+        if (c.lastPressed >= 0 && !isDpad(c.lastPressed)) {
+            // Bind it. If that input did something else, that action gets our old input (a swap).
+            const int phys = c.lastPressed, btn = ACTIONS[ctlSel_].button;
+            const int displaced = c.map[phys];
+            bool gaveAway = false;
+            for (int i = 0; i < gs::PHYS_COUNT; i++) {
+                // Triggers stay put: they are also the analog throttle and brake.
+                if (i == phys || isDpad(i) || i == gs::PHYS_LTRIGGER || i == gs::PHYS_RTRIGGER || c.map[i] != btn) continue;
+                c.map[i] = (!gaveAway && displaced >= 0 && displaced != btn) ? int8_t(displaced) : int8_t(-1);
+                gaveAway = true;
+            }
+            c.map[phys] = int8_t(btn);
+            sys_->saveBlob("controls.txt", c.serialize());
+            sfx_->menuSelect();
+            rebinding_ = false;
+        } else if ((back && !c.anyDown) || t_ > 60 * 6 || !c.connected) {
+            rebinding_ = false;  // cancelled with Esc, timed out, or unplugged
+        }
+        return;
+    }
+    if (c.suppress && !c.anyDown) c.suppress = false;  // let go of the button just bound
+    if (pad.pressed(gs::BTN_UP)) { ctlSel_ = (ctlSel_ + CTL_ROWS - 1) % CTL_ROWS; sfx_->menuMove(); }
+    if (pad.pressed(gs::BTN_DOWN)) { ctlSel_ = (ctlSel_ + 1) % CTL_ROWS; sfx_->menuMove(); }
+    if (back) { mode_ = Mode::Menu; t_ = 0; return; }
+    if (!confirm || t_ < 6) return;
+    sfx_->menuSelect();
+    if (ctlSel_ == NUM_ACTIONS) {
+        c.resetMap();
+        sys_->saveBlob("controls.txt", c.serialize());
+        toast_ = "CONTROLLER BUTTONS RESET";
+        toastT_ = 120;
+    } else if (ctlSel_ == NUM_ACTIONS + 1) {
+        mode_ = Mode::Menu;
+        t_ = 0;
+    } else if (!c.connected) {
+        toast_ = "CONNECT A CONTROLLER TO REMAP IT";
+        toastT_ = 150;
+    } else {
+        rebinding_ = true;
+        c.lastPressed = -1;
+        c.suppress = true;
+        t_ = 0;
+    }
+}
+
+void Rally::drawControls() {
+    const gs::Controller& c = sys_->ctl;
+    text("CONTROLS", HALF, 8, 1.5f, PAL_YELLOW);
+    std::string pad = "NO CONTROLLER - KEYBOARD ONLY";
+    if (c.connected) {
+        const char* kind = c.type == gs::PAD_PS5 ? "DUALSENSE (PS5)" : c.type == gs::PAD_PS4 ? "DUALSHOCK 4 (PS4)"
+                           : c.type == gs::PAD_XBOX ? "XBOX CONTROLLER" : c.type == gs::PAD_SWITCH ? "SWITCH PRO" : nullptr;
+        std::string name = kind ? kind : c.name;
+        for (auto& ch : name) ch = char(std::toupper(static_cast<unsigned char>(ch)));
+        pad = name.substr(0, 26) + " CONNECTED";
+    }
+    hud(20 - int(pad.size()) / 2, 4, pad, c.connected ? PAL_YELLOW : PAL_HUD);
+    hud(2, 6, "ACTION", PAL_YELLOW);
+    hud(15, 6, "KEYBOARD", PAL_YELLOW);
+    hud(27, 6, "CONTROLLER", PAL_YELLOW);
+    for (int a = 0; a < NUM_ACTIONS; a++) {
+        const int row = 8 + a * 2;
+        const bool sel = a == ctlSel_;
+        hud(1, row, sel ? ">" : " ", PAL_YELLOW);
+        hud(2, row, ACTIONS[a].label, sel ? PAL_YELLOW : PAL_HUD);
+        hud(15, row, ACTIONS[a].keys, PAL_HUD);
+        std::string b;
+        if (sel && rebinding_) {
+            b = frameNo_ % 40 < 28 ? "PRESS A BUTTON" : "";
+        } else if (c.connected) {
+            for (int i = 0; i < gs::PHYS_COUNT; i++)
+                if (c.map[i] == ACTIONS[a].button && !isDpad(i)) b += (b.empty() ? "" : " ") + std::string(c.physName(i));
+            if (b.empty()) b = "-";
+        } else {
+            b = "-";
+        }
+        hud(27, row, b.substr(0, 13), sel ? PAL_YELLOW : PAL_HUD);
+    }
+    const int r = 8 + NUM_ACTIONS * 2;
+    hud(1, r, ctlSel_ == NUM_ACTIONS ? ">" : " ", PAL_YELLOW);
+    hud(2, r, "RESET CONTROLLER BUTTONS", ctlSel_ == NUM_ACTIONS ? PAL_YELLOW : PAL_HUD);
+    hud(1, r + 1, ctlSel_ == NUM_ACTIONS + 1 ? ">" : " ", PAL_YELLOW);
+    hud(2, r + 1, "DONE", ctlSel_ == NUM_ACTIONS + 1 ? PAL_YELLOW : PAL_HUD);
+    hud(39 - int(std::strlen(S3_VERSION_STRING)), 27, S3_VERSION_STRING, PAL_HUD);
+}
+
+// Controller notices, rumble on rough ground and the light bar.
+void Rally::padFeedback() {
+    gs::Controller& c = sys_->ctl;
+    if (c.events != padEvents_) {
+        padEvents_ = c.events;
+        const char* kind = c.type == gs::PAD_PS5 ? "DUALSENSE (PS5)" : c.type == gs::PAD_PS4 ? "DUALSHOCK 4"
+                           : c.type == gs::PAD_XBOX ? "XBOX CONTROLLER" : c.type == gs::PAD_SWITCH ? "SWITCH PRO" : "CONTROLLER";
+        toast_ = c.connected ? std::string(kind) + " CONNECTED" : "CONTROLLER DISCONNECTED";
+        toastT_ = 180;
+        ledColor_ = -1;
+    }
+    if (!c.connected) return;
+    const bool racing = mode_ == Mode::Race;
+    if (racing && (offroad_ || inWater_) && speed_ > MAX * 0.2f && frameNo_ % 6 == 0) sys_->rumble(0.25f, 0.05f, 110);
+    // Light bar: the car's body colour, red while the turbo burns.
+    const uint16_t body = carSpec(carId_).livery[3];
+    const int want = boostT_ > 0 ? 0xf00 : body;
+    if (want != ledColor_) {
+        ledColor_ = want;
+        sys_->setLight(((want >> 8) & 15) * 17, ((want >> 4) & 15) * 17, (want & 15) * 17);
+    }
+}
+
+bool Rally::testHost(int stage, uint16_t port) {
+    carId_ = 0;
+    if (!versus_.host(stage, carId_, port)) return false;
+    type_ = GameType::Versus;
+    mode_ = Mode::Lobby;
+    lobbyStep_ = 2;
+    t_ = 0;
+    return true;
+}
+
+bool Rally::testJoin(const std::string& ip, uint16_t port, int car) {
+    if (ip == "discover") {  // find the host through its LAN broadcast, like the lobby does
+        carId_ = car;
+        type_ = GameType::Versus;
+        mode_ = Mode::Lobby;
+        lobbyStep_ = 3;
+        lobbySel_ = 0;
+        t_ = 0;
+        return versus_.search();
+    }
+    gs::NetAddr a;
+    if (!gs::NetAddr::parse(ip, port, &a)) return false;
+    carId_ = car;
+    type_ = GameType::Versus;
+    versus_.join(a, carId_);
+    mode_ = Mode::Lobby;
+    lobbyStep_ = 4;
+    t_ = 0;
+    return versus_.phase == Versus::Phase::Joining;
+}
+
+Rally::VersusReport Rally::versusReport() const {
+    return {mode_ == Mode::Finish || mode_ == Mode::Result, versus_.peerSeen, versus_.peer.finished, rank_, raceTime_, versus_.peer.time};
 }
 
 // ================================================================ headless

@@ -108,6 +108,40 @@ make
 | Turbo boost (once unlocked) | Space | click either stick |
 | CRT scanlines · fullscreen · screenshot | F1 · F11 · F12 | |
 
+### Controllers
+
+Plug in (or pair) a **PlayStation 5 DualSense**, a PS4 DualShock, an Xbox pad or any
+SDL-supported controller. The game tells you when it connects and labels buttons the way
+your pad does (Cross, Circle, L2 and so on).
+
+| Action | PlayStation | Xbox |
+|---|---|---|
+| Accelerate | Cross / R2 (analog) | A / RT |
+| Brake | Circle / L2 (analog) | B / LT |
+| Turbo | Square / L3 / R3 | X / LS / RS |
+| Radio | Triangle / touchpad | Y |
+| Shift down / up | L1 / R1 | LB / RB |
+| Start / back | Options / Create | Menu / View |
+
+All of these can be remapped under **CONTROLS** on the main menu, and your layout
+is saved. Pads that support it rumble on crashes, bumps, rough ground and turbo,
+and a DualSense or DualShock light bar glows in your car's colour (red while the
+turbo burns).
+
+### Head to head (LAN)
+
+Race a friend on the same network. Choose **HEAD TO HEAD**, pick a car, then one
+player chooses **HOST A GAME** (and a stage) and the other **JOIN A GAME**. Games
+host themselves automatically, so the joiner just picks one from the list. Each machine
+drives its own car and streams its position to the other 60 times a second. This
+is the same shape a future internet server will use. It needs the desktop build,
+because browsers can't open UDP sockets. It uses UDP ports 47016 (discovery) and 47017.
+
+### Version
+
+The title, menu, pause and controls screens show the version and build,
+for example `V1.4.0 (a1b2c3d)`. `./s3 --version` prints it too.
+
 **Rumour has it** the developers left something on the title screen for anyone who types the right
 four characters and presses Enter. Whatever it is, it comes with three shots of turbo per stage.
 
@@ -142,6 +176,7 @@ src/game/      rally (game, physics, AI, HUD) · stages · art · sound · radio
 ./s3 --sim --shots DIR      # plus PNG screenshots
 ./s3 --record V.raw A.raw   # scripted player, raw video + audio for ffmpeg
 ./s3 --radio DIR            # render each radio station to a WAV
+./s3 --versus-test [STAGE] [--discover]   # two consoles race over loopback UDP
 ```
 
 ## License

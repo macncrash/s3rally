@@ -31,6 +31,27 @@ struct Pad {
     void latch();
 };
 
+// Physical controller inputs: SDL game-controller buttons 0..20, then the two triggers.
+constexpr int PHYS_LTRIGGER = 21, PHYS_RTRIGGER = 22, PHYS_COUNT = 23;
+enum PadType { PAD_NONE, PAD_XBOX, PAD_PS4, PAD_PS5, PAD_SWITCH, PAD_OTHER };
+
+// The attached controller and its (remappable) button map.
+struct Controller {
+    bool connected = false;
+    PadType type = PAD_NONE;
+    std::string name;
+    int events = 0;            // bumps on connect/disconnect, so the game can show a notice
+    int8_t map[PHYS_COUNT];    // physical input -> Button, -1 = unbound
+    int lastPressed = -1;      // most recent physical press (the game clears it to capture a rebind)
+    bool suppress = false;     // while set, physical presses don't reach the pad (used when rebinding)
+    bool anyDown = false;      // any physical button or trigger held right now
+    Controller() { resetMap(); }
+    void resetMap();
+    const char* physName(int phys) const;  // label as printed on this controller
+    std::string serialize() const;
+    void deserialize(const std::string& s);
+};
+
 class System;
 
 class Cart {
@@ -57,11 +78,18 @@ public:
     bool saveScreenshot(const std::string& path);
 
     std::string dataPath(const std::string& file) const;  // per-user save directory
+    // Small persistent settings: a file on desktop, localStorage in a browser.
+    std::string loadBlob(const std::string& name) const;
+    void saveBlob(const std::string& name, const std::string& data) const;
+    // Controller feedback (no-ops without a capable pad).
+    void rumble(float low, float high, int ms);
+    void setLight(int r, int g, int b);
     void quit() { quit_ = true; }
 
     VDP vdp;
     APU apu;
     Pad pad;
+    Controller ctl;
     uint64_t frame = 0;
     uint32_t fb[SCREEN_W * SCREEN_H] = {};
     bool headless;
@@ -85,6 +113,8 @@ private:
     SDL_Texture* tex_ = nullptr;
     _SDL_GameController* ctl_ = nullptr;
     uint32_t audioDev_ = 0;
+    bool trigWas_[2] = {false, false};
+    void openController(int index);
     bool vsync_ = false;
     uint64_t last_ = 0;
     double acc_ = 0;

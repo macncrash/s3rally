@@ -45,8 +45,25 @@ and per sprite into sprites, at 17 levels.
 
 ## Pad
 
-A 6-button pad: D-pad, A B C, X Y Z, START and MODE. Analog stick and triggers
+Up to one game controller at a time, through SDL: PlayStation, Xbox, Switch Pro and
+others are recognised by type. Physical inputs (buttons plus both triggers) pass
+through a remappable table onto the console's virtual
+6-button pad; analog stick and triggers are also exposed directly. Rumble and
+light-bar output are supported where the pad has them.
+
+The virtual pad is a 6-button pad: D-pad, A B C, X Y Z, START and MODE. Analog stick and triggers
 are available as `axisX`, `accel` and `brake`.
+
+## Link port
+
+A non-blocking UDP interface (`src/console/link.h`) for local-network play:
+open a port, send, broadcast to every interface, poll for datagrams. It isn't
+available in the browser build.
+
+## Save storage
+
+`loadBlob` and `saveBlob` hold small settings files. They are files in the
+user's data folder on desktop and localStorage in a browser.
 
 ## Cartridge interface
 
