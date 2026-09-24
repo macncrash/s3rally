@@ -36,6 +36,7 @@ const char* VOICE_TEXT[V_COUNT] = {
     "Hairpin left. Don't cut!", "Hairpin right. Don't cut!", "Long easy left", "Long easy right",
     "Over crest!", "Splash!", "Don't cut!", "Checkpoint!", "Extended play!", "Final lap!",
     "Game over. Yeah!", "Congratulations!", "Three", "Two", "One", "Go!", "Finish!", "You win!", "Maybe.",
+    "Eighty-eight point one. The Blade!", "One oh one point five. Neon F.M.", "Ninety-four seven. Kool rock and roll!",
 };
 
 // ------------------------------------------------------------------ stages

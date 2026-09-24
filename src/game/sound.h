@@ -1,7 +1,6 @@
-// S3 RALLY - sound driver: FM music sequencer, PCM drums, engine model,
-// effects and the co-driver's voice.
-// Channels: FM0 engine, FM1 rival engine, FM2 bass, FM3 lead, FM4 arpeggio,
-// FM5 effects, PSG0-1 beeps, NOISE road/skid, PCM0 voice, PCM1 drums.
+// S3 RALLY - sound driver: engine model, effects and the co-driver's voice.
+// Channels: FM0 engine, FM1 rival engine, FM2-7 radio (see radio.h), FM8 effects,
+// PSG0-1 beeps, NOISE road/skid, PCM0 voice, PCM1-3 radio drums.
 #pragma once
 #include <atomic>
 #include <string>
@@ -12,32 +11,6 @@
 #include "stages.h"
 
 namespace rally {
-
-enum Song { SONG_DESERT, SONG_FOREST, SONG_MOUNTAIN, SONG_LAKESIDE, SONG_TITLE, SONG_COUNT };
-
-class Music {
-public:
-    explicit Music(gs::APU& apu);
-    void play(int song);
-    void stop();
-    void toggle();
-    bool enabled() const { return enabled_; }
-    void tick();
-
-private:
-    struct Track {
-        float bpm;
-        std::vector<float> bass, lead, arp;
-        std::vector<int> drums;
-    };
-    gs::APU& apu_;
-    std::vector<Track> songs_;
-    gs::Sample kick_, snare_, hat_, kickHat_, snareHat_;
-    int song_ = -1;
-    bool enabled_ = true;
-    long step_ = 0;
-    double timer_ = 0;
-};
 
 class CoDriver {
 public:

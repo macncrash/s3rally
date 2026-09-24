@@ -13,82 +13,7 @@ namespace rally {
 
 namespace {
 
-float noteFreq(const std::string& n) {
-    static const int base[7] = {9, 11, 0, 2, 4, 5, 7};  // A B C D E F G
-    if (n.size() < 2 || n[0] < 'A' || n[0] > 'G') return 0;
-    int semi = base[n[0] - 'A'];
-    size_t i = 1;
-    if (n[i] == '#') { semi++; i++; }
-    int oct = std::atoi(n.c_str() + i);
-    int midi = 12 * (oct + 1) + semi;
-    return 440.0f * std::pow(2.0f, (midi - 69) / 12.0f);
-}
-
-std::vector<float> parse(std::initializer_list<const char*> bars) {
-    std::vector<float> out;
-    for (const char* b : bars) {
-        std::istringstream ss(b);
-        std::string t;
-        while (ss >> t) out.push_back(t == "." ? 0.0f : t == "-" ? -1.0f : noteFreq(t));
-    }
-    return out;
-}
-
-// Arpeggio bars: 8 notes, played twice per bar.
-std::vector<float> arp(std::initializer_list<const char*> chords) {
-    std::vector<float> out;
-    for (const char* c : chords) {
-        std::vector<float> notes;
-        std::istringstream ss(c);
-        std::string t;
-        while (ss >> t) notes.push_back(noteFreq(t));
-        for (int r = 0; r < 16; r++) out.push_back(notes[r % notes.size()]);
-    }
-    return out;
-}
-
-std::vector<int> drums(const char* pattern) {
-    std::vector<int> out;
-    std::istringstream ss(pattern);
-    std::string t;
-    while (ss >> t) out.push_back(t == "K" ? 1 : t == "S" ? 2 : t == "H" ? 3 : t == "KH" ? 4 : t == "SH" ? 5 : 0);
-    return out;
-}
-
-gs::FMPatch bassPatch() {
-    gs::FMPatch p;
-    p.alg = 4;
-    p.fb = 0.45f;
-    p.op[0] = {1, 0.6f, 0.001f, 0.12f, 0.15f, 0.05f};
-    p.op[1] = {1, 1.0f, 0.001f, 0.35f, 0.55f, 0.06f};
-    p.op[2] = {2, 0.3f, 0.001f, 0.08f, 0.0f, 0.05f};
-    p.op[3] = {0.5f, 0.55f, 0.001f, 0.3f, 0.5f, 0.06f};
-    p.vol = 0.2f;
-    return p;
-}
-
-gs::FMPatch leadPatch() {
-    gs::FMPatch p;
-    p.alg = 4;
-    p.fb = 0.5f;
-    p.op[0] = {1, 0.42f, 0.03f, 0.4f, 0.7f, 0.1f};
-    p.op[1] = {1, 1.0f, 0.012f, 0.6f, 0.8f, 0.12f};
-    p.op[2] = {3, 0.14f, 0.02f, 0.3f, 0.5f, 0.1f, 1.2f};
-    p.op[3] = {1, 0.5f, 0.015f, 0.6f, 0.8f, 0.12f, 1.6f};
-    p.vol = 0.12f;
-    return p;
-}
-
-gs::FMPatch arpPatch() {
-    gs::FMPatch p;
-    p.alg = 4;
-    p.op[0] = {3.5f, 0.45f, 0.001f, 0.12f, 0.0f, 0.1f};
-    p.op[1] = {1, 1.0f, 0.001f, 0.25f, 0.0f, 0.1f};
-    p.op[2] = {7, 0.18f, 0.001f, 0.08f, 0.0f, 0.1f};
-    p.op[3] = {2, 0.35f, 0.001f, 0.2f, 0.0f, 0.1f};
-    p.vol = 0.05f;
-    return p;
-}
+constexpr int FX_CH = 8;  // FM channel reserved for effects (the radio owns 2-7)
 
 gs::FMPatch enginePatch() {
     gs::FMPatch p;
@@ -102,134 +27,7 @@ gs::FMPatch enginePatch() {
     return p;
 }
 
-gs::Sample synthDrum(int kind) {
-    gs::Sample s;
-    s.rate = 22050;
-    const int n = kind == 3 ? 900 : 4400;
-    s.data.resize(n);
-    uint32_t seed = 12345;
-    float prev = 0;
-    for (int i = 0; i < n; i++) {
-        float t = float(i) / s.rate;
-        seed = seed * 1664525u + 1013904223u;
-        float noise = float(int32_t(seed)) / 2147483648.0f;
-        float v = 0;
-        if (kind == 1 || kind == 4) {
-            float f = 45 + 110 * std::exp(-t * 28);
-            v += std::sin(6.2831853f * f * t) * std::exp(-t * 14) * 0.95f;
-        }
-        if (kind == 2 || kind == 5) v += (noise * 0.7f + std::sin(6.2831853f * 190 * t) * 0.4f) * std::exp(-t * 20) * 0.7f;
-        if (kind == 3 || kind == 4 || kind == 5) {
-            float hp = noise - prev;
-            v += hp * std::exp(-t * 90) * 0.28f;
-        }
-        prev = noise;
-        s.data[i] = v;
-    }
-    return s;
-}
-
 }  // namespace
-
-// ------------------------------------------------------------ music
-
-Music::Music(gs::APU& apu) : apu_(apu) {
-    kick_ = synthDrum(1);
-    snare_ = synthDrum(2);
-    hat_ = synthDrum(3);
-    kickHat_ = synthDrum(4);
-    snareHat_ = synthDrum(5);
-
-    songs_.resize(SONG_COUNT);
-    songs_[SONG_DESERT] = {160,
-        parse({"E1 . E2 . E1 . E2 . E1 . E2 . E1 . D2 .", "C2 . C3 . C2 . C3 . C2 . C3 . C2 . B1 .",
-               "D2 . D3 . D2 . D3 . D2 . D3 . D2 . C#2 .", "B1 . B2 . B1 . B2 . B1 . B2 . D#2 . F#2 ."}),
-        parse({"B4 - E5 - G5 - B5 - A5 - G5 - F#5 - E5 -", "G5 - - - E5 - C5 - E5 - G5 - C6 - B5 -",
-               "A5 - - - F#5 - D5 - F#5 - A5 - D6 - C6 -", "B5 - - - - - D#5 - F#5 - - - B4 - - -",
-               "E6 - - - D6 - B5 - G5 - - - E5 - G5 -", "C6 - - - B5 - G5 - E5 - - - G5 - C6 -",
-               "D6 - - - C6 - A5 - F#5 - A5 - D6 - F#6 -", "F#6 - - - E6 - D#6 - B5 - - - . . . ."}),
-        arp({"E4 G4 B4 E5 G5 E5 B4 G4", "C4 E4 G4 C5 E5 C5 G4 E4", "D4 F#4 A4 D5 F#5 D5 A4 F#4", "B3 D#4 F#4 B4 D#5 B4 F#4 D#4"}),
-        drums("K . H K S . H . K K H . S . H SH")};
-    songs_[SONG_FOREST] = {138,
-        parse({"A1 - A2 . A1 - A2 . A1 - A2 . G1 - G2 .", "F1 - F2 . F1 - F2 . F1 - F2 . G1 - G2 .",
-               "C2 - C3 . C2 - C3 . C2 - C3 . E2 - E3 .", "G1 - G2 . G1 - G2 . G1 - B1 . D2 - E2 ."}),
-        parse({"E5 - - . D5 . C5 . D5 - E5 - A4 - - -", "F5 - - . E5 . D5 . C5 - D5 - C5 - A4 -",
-               "G5 - - . E5 . C5 . E5 - G5 - C6 - - -", "B5 - A5 - G5 - D5 - G5 - - - . . . .",
-               "A5 - - - G5 - E5 - A5 - - . C6 - B5 -", "A5 - - - F5 - - - C5 - D5 - F5 - - -",
-               "G5 - - - E5 - C5 - G5 - A5 - C6 - D6 -", "E6 - - - D6 - B5 - G5 - - - A5 . B5 ."}),
-        arp({"A3 C4 E4 A4 C5 A4 E4 C4", "F3 A3 C4 F4 A4 F4 C4 A3", "C4 E4 G4 C5 E5 C5 G4 E4", "G3 B3 D4 G4 B4 G4 D4 B3"}),
-        drums("K . H . S . H . K . K H S . H H")};
-    songs_[SONG_MOUNTAIN] = {146,
-        parse({"D2 . D3 . D2 . D3 . D2 . D3 . D2 . C3 .", "A#1 . A#2 . A#1 . A#2 . A#1 . A#2 . A#1 . A1 .",
-               "C2 . C3 . C2 . C3 . C2 . C3 . C2 . E2 .", "A1 . A2 . A1 . A2 . A1 . A2 . C#2 . E2 ."}),
-        parse({"A4 - D5 - F5 - A5 - - - G5 - F5 - E5 -", "F5 - - - D5 - A#4 - D5 - F5 - A#5 - - -",
-               "G5 - - - E5 - C5 - E5 - G5 - C6 - A#5 -", "A5 - - - - - - - C#5 - E5 - A5 - - -",
-               "D6 - - - C6 - A5 - F5 - - - A5 - D6 -", "D6 - C6 - A#5 - - - F5 - D5 - F5 - A#5 -",
-               "C6 - - - A#5 - G5 - E5 - G5 - C6 - E6 -", "C#6 - - - - - - - A5 - - - . . . ."}),
-        arp({"D4 F4 A4 D5 F5 D5 A4 F4", "A#3 D4 F4 A#4 D5 A#4 F4 D4", "C4 E4 G4 C5 E5 C5 G4 E4", "A3 C#4 E4 A4 C#5 A4 E4 C#4"}),
-        drums("K . H . S . H K . K H . S . H S")};
-    songs_[SONG_LAKESIDE] = {126,
-        parse({"F1 . . F2 . . F1 . F2 . F1 . . F2 E2 .", "E1 . . E2 . . E1 . E2 . E1 . . E2 D2 .",
-               "D2 . . D3 . . D2 . D3 . D2 . . D3 C3 .", "G1 . . G2 . . G1 . G2 . G1 . B1 . D2 ."}),
-        parse({"A5 - - - G5 - E5 - - - C5 - D5 - E5 -", "G5 - - - - - E5 - D5 - B4 - - - - -",
-               "F5 - - - E5 - D5 - C5 - A4 - C5 - D5 -", "D5 - - - - - - - B4 - D5 - G5 - - -",
-               "C6 - - - B5 - A5 - G5 - E5 - G5 - A5 -", "B5 - - - G5 - E5 - D5 - E5 - G5 - - -",
-               "A5 - - - F5 - D5 - A5 - C6 - D6 - C6 -", "B5 - - - - - - - G5 - - - . . . ."}),
-        arp({"F4 A4 C5 E5 A5 E5 C5 A4", "E4 G4 B4 D5 G5 D5 B4 G4", "D4 F4 A4 C5 F5 C5 A4 F4", "G3 B3 D4 F4 B4 F4 D4 B3"}),
-        drums("K . H . S . H . K . H K S . H .")};
-    songs_[SONG_TITLE] = {150,
-        parse({"G1 . G2 . G1 G1 G2 . G1 . G2 . G1 G1 G2 .", "E1 . E2 . E1 E1 E2 . E1 . E2 . E1 E1 E2 .",
-               "C2 . C3 . C2 C2 C3 . C2 . C3 . C2 C2 C3 .", "D2 . D3 . D2 D2 D3 . D2 . D3 . A1 . C#2 ."}),
-        parse({"D5 - - - G5 - - - A5 - B5 - A5 - G5 -", "E5 - - - - - D5 - E5 - G5 - B4 - - -",
-               "C5 - - - E5 - G5 - C6 - B5 - A5 - G5 -", "A5 - - - - - - - F#5 - G5 - A5 - - -",
-               "B5 - - - A5 - G5 - D6 - - - B5 - - -", "G5 - - - E5 - G5 - B5 - A5 - G5 - E5 -",
-               "E5 - G5 - C6 - - - B5 - A5 - G5 - E5 -", "D5 - - - F#5 - - - A5 - - - D6 - - -"}),
-        arp({"G3 B3 D4 G4 B4 G4 D4 B3", "E3 G3 B3 E4 G4 E4 B3 G3", "C4 E4 G4 C5 E5 C5 G4 E4", "D4 F#4 A4 D5 F#5 D5 A4 F#4"}),
-        drums("KH . H . SH . H . KH . KH H SH . H H")};
-}
-
-void Music::play(int song) {
-    song_ = song;
-    step_ = 0;
-    timer_ = 0;
-    apu_.setPatch(2, bassPatch());
-    apu_.setPatch(3, leadPatch());
-    apu_.setPatch(4, arpPatch());
-    apu_.setPan(3, 0.2f);
-    apu_.setPan(4, -0.4f);
-}
-
-void Music::stop() {
-    song_ = -1;
-    for (int ch : {2, 3, 4}) apu_.keyOff(ch);
-}
-
-void Music::toggle() {
-    enabled_ = !enabled_;
-    if (!enabled_)
-        for (int ch : {2, 3, 4}) apu_.keyOff(ch);
-}
-
-void Music::tick() {
-    if (song_ < 0 || !enabled_) return;
-    const Track& t = songs_[song_];
-    timer_ -= 1;
-    if (timer_ > 0) return;
-    timer_ += 60.0 * 60.0 / (t.bpm * 4);  // frames per 16th note
-    const long i = step_++;
-    auto voice = [&](int ch, const std::vector<float>& v) {
-        float f = v[i % v.size()];
-        if (f > 0) apu_.keyOn(ch, f);
-        else if (f == 0) apu_.keyOff(ch);
-    };
-    voice(2, t.bass);
-    voice(3, t.lead);
-    voice(4, t.arp);
-    const gs::Sample* d[] = {nullptr, &kick_, &snare_, &hat_, &kickHat_, &snareHat_};
-    int k = t.drums[i % t.drums.size()];
-    if (k) apu_.play(1, d[k], 0.55f);
-}
-
 // ------------------------------------------------------------ voice
 
 CoDriver::~CoDriver() {
@@ -309,8 +107,8 @@ void Sfx::tick() {
             bell.op[2] = {7, 0.2f, 0.001f, 0.1f, 0.0f, 0.1f};
             bell.op[3] = {2, 0.4f, 0.001f, 0.5f, 0.0f, 0.3f};
             bell.vol = 0.2f;
-            apu_.setPatch(5, bell);
-            apu_.keyOn(5, n.freq);
+            apu_.setPatch(FX_CH, bell);
+            apu_.keyOn(FX_CH, n.freq);
         }
     }
     queue_.erase(std::remove_if(queue_.begin(), queue_.end(), [](const Note& n) { return n.delay <= 0; }), queue_.end());
@@ -366,9 +164,9 @@ void Sfx::crash(bool hard) {
     p.op[2] = {0.5f, 0.5f, 0.001f, 0.1f, 0.0f, 0.1f};
     p.op[3] = {1, 0.6f, 0.001f, 0.25f, 0.0f, 0.1f};
     p.vol = hard ? 0.45f : 0.25f;
-    apu_.setPatch(5, p);
-    apu_.keyOn(5, hard ? 70 : 110);
-    apu_.setFreq(5, 30);
+    apu_.setPatch(FX_CH, p);
+    apu_.keyOn(FX_CH, hard ? 70 : 110);
+    apu_.setFreq(FX_CH, 30);
 }
 
 void Sfx::bump() { crash(false); }

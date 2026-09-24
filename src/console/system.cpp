@@ -35,7 +35,7 @@ static int keyToButton(SDL_Keycode k) {
         case SDLK_c: case SDLK_SPACE: return BTN_C;
         case SDLK_q: return BTN_X;
         case SDLK_w: return BTN_Y;
-        case SDLK_e: return BTN_Z;
+        case SDLK_e: case SDLK_TAB: return BTN_Z;
         case SDLK_RETURN: return BTN_START;
         case SDLK_ESCAPE: case SDLK_BACKSPACE: return BTN_MODE;
         default: return -1;

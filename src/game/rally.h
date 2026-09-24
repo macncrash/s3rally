@@ -6,6 +6,7 @@
 
 #include "art.h"
 #include "console/system.h"
+#include "radio.h"
 #include "sound.h"
 #include "stages.h"
 
@@ -88,6 +89,8 @@ private:
     void text(const std::string& s, float x, float y, float scale, int pal, int align = 0);
     void hud(int col, int row, const std::string& s, int pal = PAL_HUD);
     void say(std::vector<std::string> lines, int frames, int pal = PAL_YELLOW);
+    void tuneRadio();
+    void drawRadio(int row);
     void loadRecords();
     void saveRecords();
 
@@ -95,7 +98,7 @@ private:
     gs::VDP* vdp_ = nullptr;
     Art art_;
     Track track_;
-    std::unique_ptr<Music> music_;
+    std::unique_ptr<Radio> radio_;
     std::unique_ptr<Sfx> sfx_;
     std::unique_ptr<CoDriver> voice_;
     int tilesUsed_ = 0;

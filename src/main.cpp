@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "console/system.h"
+#include "game/radio.h"
 #include "game/rally.h"
 
 static int simulate(const char* shotDir) {
@@ -100,7 +101,8 @@ static int record(const std::string& videoPath, const std::string& audioPath, in
     // Menu script: {frame, button} presses, each held for 4 frames.
     struct Press { int frame; gs::Button b; };
     const Press script[] = {{330, gs::BTN_START}, {420, gs::BTN_DOWN}, {470, gs::BTN_UP}, {530, gs::BTN_START},
-                            {600, gs::BTN_RIGHT}, {700, gs::BTN_START}, {760, gs::BTN_START}};
+                            {600, gs::BTN_RIGHT}, {700, gs::BTN_START}, {760, gs::BTN_START},
+                            {1900, gs::BTN_Z}, {2900, gs::BTN_Z}};  // flip the radio mid-race
     std::vector<float> lag(9, 0.0f);
     int raceFrames = 0, g = 0;
     bool held = false;
@@ -136,15 +138,63 @@ static int record(const std::string& videoPath, const std::string& audioPath, in
     return 0;
 }
 
+// Render each radio station offline: report levels and optionally write WAVs.
+static void radioCheck(const char* wavDir, int seconds) {
+    for (int s = 0; s < rally::NUM_STATIONS; s++) {
+        gs::APU apu;
+        apu.init(48000);
+        rally::Radio radio(apu);
+        radio.tuneTo(s);
+        std::vector<float> buf(800 * 2), all;
+        double sum = 0, peak = 0;
+        long n = 0, clip = 0;
+        for (int f = 0; f < 60 * seconds; f++) {
+            radio.tick();
+            apu.render(buf.data(), 800);
+            for (float v : buf) {
+                sum += double(v) * v;
+                peak = std::max(peak, double(std::fabs(v)));
+                if (std::fabs(v) > 0.97f) clip++;
+                n++;
+            }
+            if (wavDir) all.insert(all.end(), buf.begin(), buf.end());
+        }
+        std::printf("radio %-28s rms %.3f peak %.3f clipped %.3f%%\n", radio.stationLine().c_str(), std::sqrt(sum / n), peak,
+                    100.0 * clip / n);
+        if (wavDir) {
+            std::string p = std::string(wavDir) + "/station" + std::to_string(s) + ".wav";
+            FILE* f = std::fopen(p.c_str(), "wb");
+            if (!f) continue;
+            auto u32 = [&](uint32_t v) { std::fwrite(&v, 4, 1, f); };
+            auto u16 = [&](uint16_t v) { std::fwrite(&v, 2, 1, f); };
+            uint32_t bytes = uint32_t(all.size() * 2);
+            std::fwrite("RIFF", 1, 4, f); u32(36 + bytes); std::fwrite("WAVEfmt ", 1, 8, f);
+            u32(16); u16(1); u16(2); u32(48000); u32(48000 * 4); u16(4); u16(16);
+            std::fwrite("data", 1, 4, f); u32(bytes);
+            for (float v : all) u16(uint16_t(int16_t(std::lround(std::clamp(v, -1.0f, 1.0f) * 32767))));
+            std::fclose(f);
+        }
+    }
+}
+
 int main(int argc, char** argv) {
     bool sim = false;
     const char* shots = nullptr;
+    const char* radioWav = nullptr;
     for (int i = 1; i < argc; i++) {
         if (!std::strcmp(argv[i], "--sim")) sim = true;
         else if (!std::strcmp(argv[i], "--shots") && i + 1 < argc) shots = argv[++i];
+        else if (!std::strcmp(argv[i], "--radio") && i + 1 < argc) radioWav = argv[++i];
         else if (!std::strcmp(argv[i], "--record") && i + 2 < argc) return record(argv[i + 1], argv[i + 2], 50);
     }
-    if (sim) return simulate(shots);
+    if (radioWav) {
+        radioCheck(radioWav, 150);
+        return 0;
+    }
+    if (sim) {
+        radioCheck(nullptr, 30);
+        return simulate(shots);
+    }
     gs::System sys;
     rally::Rally cart;
     return sys.run(cart);

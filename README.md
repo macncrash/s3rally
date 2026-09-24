@@ -39,15 +39,27 @@ generated at boot. There are no asset files.
 - **2 cars,** each with automatic or manual transmission.
 - **A co-driver** calls every corner: *"medium left"*, *"hairpin right, don't
   cut!"*, *"over crest!"*.
-- **A 4-operator FM soundtrack** with five original songs, PCM drums, an engine
-  that follows the revs, and rival engines that pass with Doppler.
+- **An in-car radio.** Press **Tab** to flip between three stations, each with an
+  announcer ident, and static as the dial moves:
+  - **88.1 THE BLADE** (hair metal): double-tracked distorted power chords,
+    palm-muted chugs and screaming bent-note solos.
+  - **101.5 NEON FM** (synth pop): sequenced bass, echoing arpeggios, gated
+    snares and handclaps.
+  - **94.7 KOOL** (rock & roll): a shuffled boogie bass, a honking sax, and
+    pounding piano.
+
+  Stations keep playing while you listen elsewhere, so flipping back lands you
+  mid-song, and the music ducks when the co-driver speaks. All six songs are
+  original.
+- **FM sound with real grit.** The engine note follows the revs, and rival
+  engines pass with Doppler.
 - **An arcade finish:** CRT scanlines, 4:3 output, a live course map and a rev
   counter. The clock-out comes with a *"Game over. Yeah!"*
 
 <p align="center">
   <img src="docs/shots/title.png" width="32%"> <img src="docs/shots/menu.png" width="32%"> <img src="docs/shots/cars.png" width="32%"><br>
   <img src="docs/shots/village.png" width="32%"> <img src="docs/shots/forest.png" width="32%"> <img src="docs/shots/mountain.png" width="32%"><br>
-  <img src="docs/shots/desert.png" width="32%"> <img src="docs/shots/lakeside.png" width="32%">
+  <img src="docs/shots/desert.png" width="32%"> <img src="docs/shots/lakeside.png" width="32%"> <img src="docs/shots/radio.png" width="32%">
 </p>
 
 ## Build and play
@@ -70,7 +82,7 @@ make
 | Shift down / up (manual) | Q / W | LB / RB |
 | Start · pause · select | Enter | Start |
 | Back · quit (while paused) | Esc | Back |
-| Music | E | Y |
+| Radio station | Tab (or E) | Y |
 | CRT scanlines · fullscreen · screenshot | F1 · F11 · F12 | |
 
 **Tip:** at speed, hold the steering *into* a bend. The tail steps out and the
@@ -87,14 +99,14 @@ On other systems the game runs without speech.
 | Sprites | 256 per frame, each scaled to any size, with fog, shadow mode and clip line |
 | Road generator | textured road from per-scanline registers: surface, verges, water, kerbs, bands |
 | Raster | per-line scroll, backdrop colour and distance fog |
-| Audio | 6-channel 4-operator FM · 3 square + noise PSG · 2 PCM channels |
+| Audio | 9-channel 4-operator FM with per-channel overdrive, tone filter, vibrato, glide and echo send · 3 square + noise PSG · 4 PCM channels · stereo echo |
 | Input | 6-button pad plus analog stick and triggers |
 
 Full reference: **[docs/HARDWARE.md](docs/HARDWARE.md)**.
 
 ```
 src/console/   vdp · apu · system (SDL2 board, boot ROM) · gfx (SDK, font ROM)
-src/game/      rally (game, physics, AI, HUD) · stages · art · sound
+src/game/      rally (game, physics, AI, HUD) · stages · art · sound · radio (songs + sequencer)
 ```
 
 ## Headless test
@@ -103,6 +115,7 @@ src/game/      rally (game, physics, AI, HUD) · stages · art · sound
 ./s3 --sim                  # autopilot races every stage and reports
 ./s3 --sim --shots DIR      # plus PNG screenshots
 ./s3 --record V.raw A.raw   # scripted player, raw video + audio for ffmpeg
+./s3 --radio DIR            # render each radio station to a WAV
 ```
 
 ## License

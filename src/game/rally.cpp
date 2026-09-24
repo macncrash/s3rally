@@ -71,7 +71,7 @@ void Rally::init(gs::System& sys) {
     sys_ = &sys;
     vdp_ = &sys.vdp;
     buildArt(*vdp_, art_);
-    music_ = std::make_unique<Music>(sys.apu);
+    radio_ = std::make_unique<Radio>(sys.apu);
     sfx_ = std::make_unique<Sfx>(sys.apu);
     voice_ = std::make_unique<CoDriver>(sys.apu);
     if (!sys.headless || sys.scripted) voice_->loadAsync(sys.dataPath("voice/"));
@@ -116,7 +116,6 @@ void Rally::toTitle() {
     dist_ += SEG * 30;
     for (auto& r : rivals_) r.speed = MAX * r.top * 0.8f;
     speed_ = MAX * 0.7f;
-    music_->play(SONG_TITLE);
     sfx_->engine(0, 0, false);
     champ_.clear();
     startRank_ = 16;
@@ -166,7 +165,6 @@ void Rally::beginCountdown() {
     mode_ = Mode::Countdown;
     t_ = 0;
     dim_ = false;
-    music_->stop();
 }
 
 void Rally::say(std::vector<std::string> lines, int frames, int pal) {
@@ -175,16 +173,28 @@ void Rally::say(std::vector<std::string> lines, int frames, int pal) {
     msgPal_ = pal;
 }
 
+void Rally::tuneRadio() {
+    int st = radio_->next();
+    sfx_->menuMove();
+    if (st >= 0) voice_->say(V_ST_BLADE + st, true);
+}
+
+// Station card: frequency and name, then the song, over a dark backing.
+void Rally::drawRadio(int row) {
+    if (radio_->cardFrames() <= 0) return;
+    const std::string a = radio_->stationLine(), b = radio_->songLine();
+    hud(20 - int(a.size()) / 2, row, a, PAL_YELLOW);
+    if (!b.empty()) hud(20 - int(b.size()) / 2, row + 1, b, PAL_HUD);
+    for (int i = -1; i <= 1; i++) spr(art_.panelWide, HALF + i * 100.0f, (row + 2) * 8.0f + 3, 25, 0, false, 0, 224, true);
+}
+
 // ================================================================ frame
 
 void Rally::frame(gs::System& sys) {
     frameNo_++;
     t_++;
     gs::Pad& pad = sys.pad;
-    if (pad.pressed(gs::BTN_Z) && mode_ != Mode::Menu) {
-        music_->toggle();
-        say({music_->enabled() ? "MUSIC ON" : "MUSIC OFF"}, 60, PAL_HUD);
-    }
+    if (pad.pressed(gs::BTN_Z) && mode_ != Mode::Menu) tuneRadio();
     const bool confirm = pad.pressed(gs::BTN_START) || pad.pressed(gs::BTN_C);
     const bool back = pad.pressed(gs::BTN_MODE) || pad.pressed(gs::BTN_B);
     dim_ = false;
@@ -209,7 +219,7 @@ void Rally::frame(gs::System& sys) {
             else if (confirm && t_ > 5) {
                 sfx_->menuSelect();
                 if (menuSel_ == 3) {
-                    music_->toggle();
+                    tuneRadio();
                 } else {
                     type_ = menuSel_ == 0 ? GameType::Championship : menuSel_ == 1 ? GameType::Practice : GameType::TimeAttack;
                     t_ = 0;
@@ -251,7 +261,6 @@ void Rally::frame(gs::System& sys) {
             }
             break;
         case Mode::Intro:
-            if (t_ == 1) music_->play(stageDef(stage_).music);
             if (t_ > 150 || (t_ > 30 && confirm)) beginCountdown();
             break;
         case Mode::Countdown: {
@@ -267,7 +276,6 @@ void Rally::frame(gs::System& sys) {
                 mode_ = Mode::Race;
                 t_ = 0;
                 say({"GO!"}, 50);
-                music_->play(stageDef(stage_).music);
             }
             break;
         }
@@ -328,7 +336,8 @@ void Rally::frame(gs::System& sys) {
         updateParticles();
     }
     updateSound();
-    music_->tick();
+    radio_->duck(sys.apu.playing(0));  // turn the radio down while the co-driver talks
+    radio_->tick();
     sfx_->tick();
     voice_->tick();
     if (msgT_ > 0 && --msgT_ == 0) msg_.clear();
@@ -367,7 +376,6 @@ void Rally::gameOver() {
     timer_ = 0;
     say({"GAME OVER"}, 330, PAL_RED);
     voice_->say(V_GAME_OVER, true);
-    music_->stop();
 }
 
 void Rally::afterResult() {
@@ -383,8 +391,7 @@ void Rally::afterResult() {
         t_ = 0;
         voice_->say(rank_ == 1 ? V_CONGRATS : V_FINISH, true);
         sfx_->fanfare();
-        music_->play(SONG_TITLE);
-        return;
+            return;
     }
     toTitle();
 }
@@ -954,7 +961,11 @@ void Rally::drawHud() {
     }
     const bool racing = mode_ == Mode::Countdown || mode_ == Mode::Race || mode_ == Mode::Pause || mode_ == Mode::Over ||
                         mode_ == Mode::Finish;
-    if (!racing) return;
+    if (!racing) {
+        if (mode_ != Mode::CarSelect && mode_ != Mode::Result && mode_ != Mode::Ending) drawRadio(23);
+        return;
+    }
+    drawRadio(12);
 
     if (mode_ == Mode::Countdown && t_ <= 180) {
         int n = 3 - (t_ - 1) / 60;
@@ -1015,17 +1026,19 @@ void Rally::drawMenus() {
         case Mode::Title: {
             spr(art_.logo, HALF, 118, 104, PAL_LOGO, false, 0);
             if (frameNo_ % 60 < 40) text("PRESS START", HALF, 152, 1.5f, PAL_YELLOW);
-            hud(10, 25, "(C) 2026 MACNCRASH", PAL_HUD);
-            hud(12, 26, "S3-16 SYSTEM", PAL_HUD);
+            if (radio_->cardFrames() <= 0) {  // the station card uses this space while it shows
+                hud(10, 25, "(C) 2026 MACNCRASH", PAL_HUD);
+                hud(12, 26, "S3-16 SYSTEM", PAL_HUD);
+            }
             break;
         }
         case Mode::Menu: {
             spr(art_.logo, HALF, 80, 64, PAL_LOGO, false, 0);
-            const char* items[4] = {"CHAMPIONSHIP", "PRACTICE", "TIME ATTACK", music_->enabled() ? "MUSIC  ON" : "MUSIC  OFF"};
+            const char* items[4] = {"CHAMPIONSHIP", "PRACTICE", "TIME ATTACK", radio_->station() < 0 ? "RADIO  OFF" : "RADIO  ON"};
             for (int i = 0; i < 4; i++)
                 text(items[i], HALF, 96 + i * 24.0f, 1.3f, i == menuSel_ ? PAL_YELLOW : PAL_HUD);
             text(">", 50, 96 + menuSel_ * 24.0f, 1.3f, PAL_YELLOW, -1);
-            const char* help[4] = {"3 STAGES AND A SECRET ONE.", "RACE ANY STAGE.", "SOLO. NO TIME LIMIT.", "TOGGLE THE SOUNDTRACK."};
+            const char* help[4] = {"3 STAGES AND A SECRET ONE.", "RACE ANY STAGE.", "SOLO. NO TIME LIMIT.", "CHANGE STATION. TAB IN GAME."};
             hud(20 - int(std::string(help[menuSel_]).size()) / 2, 25, help[menuSel_], PAL_HUD);
             break;
         }

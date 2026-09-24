@@ -33,12 +33,15 @@ and per sprite into sprites, at 17 levels.
 
 ## Audio (`src/console/apu.h`)
 
-- **FM:** 6 channels of 4 operators, 8 algorithms, operator-1 feedback, and
-  ADSR on every operator.
+- **FM:** 9 channels of 4 operators, 8 algorithms, operator-1 feedback, and
+  ADSR on every operator. Each channel also has overdrive, a tone filter,
+  delayed vibrato, pitch glide and an echo send, and operators can be
+  retuned live for chord voicings.
 - **PSG:** 3 square channels, plus a 15-bit LFSR noise channel with one-shot
   bursts.
-- **PCM:** 2 sample channels with pitch control.
-- **Output:** stereo, through a low-pass filter, a DC blocker and a soft clipper.
+- **PCM:** 4 sample channels with pitch and pan.
+- **Output:** stereo, through a cross-fed stereo echo, a low-pass filter, a DC
+  blocker and a soft clipper.
 
 ## Pad
 
