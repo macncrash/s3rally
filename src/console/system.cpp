@@ -32,7 +32,8 @@ static int keyToButton(SDL_Keycode k) {
         case SDLK_RIGHT: return BTN_RIGHT;
         case SDLK_z: return BTN_A;
         case SDLK_x: return BTN_B;
-        case SDLK_c: case SDLK_SPACE: return BTN_C;
+        case SDLK_c: return BTN_C;
+        case SDLK_SPACE: return BTN_TURBO;
         case SDLK_q: return BTN_X;
         case SDLK_w: return BTN_Y;
         case SDLK_e: case SDLK_TAB: return BTN_Z;
@@ -263,6 +264,10 @@ void System::pollEvents() {
                         if (saveScreenshot(p)) std::printf("screenshot: %s\n", p.c_str());
                     }
                     if (k == SDLK_F10) quit_ = true;
+                    // Remember what was typed, for cheat codes.
+                    if ((k >= SDLK_a && k <= SDLK_z) || (k >= SDLK_0 && k <= SDLK_9)) typed += char(k);
+                    else if (k == SDLK_RETURN && !alt) typed += '\n';
+                    if (typed.size() > 16) typed.erase(0, typed.size() - 16);
                 }
                 int b = keyToButton(k);
                 if (b >= 0 && !alt) pad.keys[b] = true;  // Alt+Enter is fullscreen, not START
@@ -305,6 +310,7 @@ void System::pollEvents() {
         pad.padBtn[BTN_Y] = b(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
         pad.padBtn[BTN_START] = b(SDL_CONTROLLER_BUTTON_START);
         pad.padBtn[BTN_MODE] = b(SDL_CONTROLLER_BUTTON_BACK);
+        pad.padBtn[BTN_TURBO] = b(SDL_CONTROLLER_BUTTON_LEFTSTICK) || b(SDL_CONTROLLER_BUTTON_RIGHTSTICK);
     }
 }
 

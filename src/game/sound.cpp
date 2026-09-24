@@ -193,3 +193,24 @@ void Sfx::menuSelect() {
 }
 
 }  // namespace rally
+
+namespace rally {
+
+// Turbo: a rush of air plus a rising FM whine.
+void Sfx::turbo() {
+    apu_.noiseBurst(0.35f, 9000, 0.7f);
+    gs::FMPatch p;
+    p.alg = 4;
+    p.fb = 0.7f;
+    p.op[0] = {1, 0.6f, 0.01f, 1.2f, 0.4f, 0.3f};
+    p.op[1] = {1, 1.0f, 0.02f, 1.5f, 0.3f, 0.4f};
+    p.op[2] = {2.01f, 0.3f, 0.01f, 1.0f, 0.3f, 0.3f};
+    p.op[3] = {1, 0.5f, 0.02f, 1.5f, 0.3f, 0.4f};
+    p.vol = 0.16f;
+    p.glide = 0.00006f;  // slow sweep upwards
+    apu_.setPatch(FX_CH, p);
+    apu_.keyOn(FX_CH, 180);
+    apu_.setFreq(FX_CH, 1100);
+}
+
+}  // namespace rally

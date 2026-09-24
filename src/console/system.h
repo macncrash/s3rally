@@ -14,7 +14,7 @@ struct _SDL_GameController;
 
 namespace gs {
 
-enum Button { BTN_UP, BTN_DOWN, BTN_LEFT, BTN_RIGHT, BTN_A, BTN_B, BTN_C, BTN_X, BTN_Y, BTN_Z, BTN_START, BTN_MODE, BTN_COUNT };
+enum Button { BTN_UP, BTN_DOWN, BTN_LEFT, BTN_RIGHT, BTN_A, BTN_B, BTN_C, BTN_X, BTN_Y, BTN_Z, BTN_START, BTN_MODE, BTN_TURBO, BTN_COUNT };
 
 struct Pad {
     bool cur[BTN_COUNT] = {};
@@ -65,6 +65,7 @@ public:
     uint32_t fb[SCREEN_W * SCREEN_H] = {};
     bool headless;
     bool scripted = false;  // headless, but input comes from the pad (demo recording)
+    std::string typed;  // recent keyboard letters/digits, "\n" for Enter (for cheat codes)
     bool crt = true;
 
 private:

@@ -77,13 +77,17 @@ make
 | | Keyboard | Gamepad |
 |---|---|---|
 | Steer | ← → | stick / D-pad |
-| Accelerate | C / Space / ↑ | right trigger · A |
+| Accelerate | C / ↑ | right trigger · A |
 | Brake | X / ↓ | left trigger · B |
 | Shift down / up (manual) | Q / W | LB / RB |
 | Start · pause · select | Enter | Start |
 | Back · quit (while paused) | Esc | Back |
 | Radio station | Tab (or E) | Y |
+| Turbo boost (once unlocked) | Space | click either stick |
 | CRT scanlines · fullscreen · screenshot | F1 · F11 · F12 | |
+
+**Rumour has it** the developers left something on the title screen for anyone who types the right
+four characters and presses Enter. Whatever it is, it comes with three shots of turbo per stage.
 
 **Tip:** at speed, hold the steering *into* a bend. The tail steps out and the
 car carries speed through corners that would otherwise push you onto the grass.

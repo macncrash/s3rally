@@ -82,7 +82,7 @@ static int simulate(const char* shotDir) {
 // then a race with human-style tapped steering and reaction lag). Every frame
 // is written as raw BGRA and every 1/60 s of audio as raw stereo float, for
 // muxing with ffmpeg.
-static int record(const std::string& videoPath, const std::string& audioPath, int raceSeconds) {
+static int record(const std::string& videoPath, const std::string& audioPath, int raceSeconds, bool secret) {
     gs::System sys(true);
     sys.scripted = true;
     sys.apu.init(48000);
@@ -100,17 +100,23 @@ static int record(const std::string& videoPath, const std::string& audioPath, in
     auto hold = [&](gs::Button b, bool on) { sys.pad.keys[b] = on; };
     // Menu script: {frame, button} presses, each held for 4 frames.
     struct Press { int frame; gs::Button b; };
-    const Press script[] = {{330, gs::BTN_START}, {420, gs::BTN_DOWN}, {470, gs::BTN_UP}, {530, gs::BTN_START},
-                            {600, gs::BTN_RIGHT}, {700, gs::BTN_START}, {760, gs::BTN_START},
-                            {1900, gs::BTN_Z}, {2900, gs::BTN_Z}};  // flip the radio mid-race
+    const Press script[] = {{640, gs::BTN_START}, {700, gs::BTN_START}, {790, gs::BTN_DOWN}, {840, gs::BTN_UP},
+                            {900, gs::BTN_START}, {970, gs::BTN_RIGHT}, {1070, gs::BTN_START}, {1130, gs::BTN_START},
+                            {1750, gs::BTN_TURBO}, {2150, gs::BTN_Z}, {2450, gs::BTN_TURBO}, {2850, gs::BTN_Z},
+                            {3300, gs::BTN_TURBO}};  // secret screen, then radio flips and turbo boosts mid-race
+    const int shift = secret ? 0 : 310;  // without the secret screen everything happens sooner
     std::vector<float> lag(9, 0.0f);
     int raceFrames = 0, g = 0;
     bool held = false;
     while (raceFrames < raceSeconds * 60 && g < 60 * 240) {
         for (int i = 0; i < gs::BTN_COUNT; i++) sys.pad.keys[i] = false;
-        for (const Press& p : script)
-            if (g >= p.frame && g < p.frame + 4) hold(p.b, true);
-        if (cart.racing() || (g > 770 && !cart.finished())) {
+        for (const Press& p : script) {
+            if (!secret && p.frame == 640) continue;  // that press only leaves the secret screen
+            const int at = p.frame - shift;
+            if (g >= at && g < at + 4) hold(p.b, true);
+        }
+        if (secret && g == 300) sys.typed = "s3ga\n";  // type the secret code on the title screen
+        if (cart.racing() || (g > 1140 - shift && !cart.finished())) {
             // Human-ish driving: see the road, react ~8 frames later, tap the keys.
             rally::Input in = cart.botInput();
             lag.push_back(in.steer);
@@ -185,7 +191,11 @@ int main(int argc, char** argv) {
         if (!std::strcmp(argv[i], "--sim")) sim = true;
         else if (!std::strcmp(argv[i], "--shots") && i + 1 < argc) shots = argv[++i];
         else if (!std::strcmp(argv[i], "--radio") && i + 1 < argc) radioWav = argv[++i];
-        else if (!std::strcmp(argv[i], "--record") && i + 2 < argc) return record(argv[i + 1], argv[i + 2], 50);
+        else if (!std::strcmp(argv[i], "--record") && i + 2 < argc) {
+            bool secret = false;
+            for (int k = 1; k < argc; k++) secret |= !std::strcmp(argv[k], "--secret");
+            return record(argv[i + 1], argv[i + 2], 50, secret);
+        }
     }
     if (radioWav) {
         radioCheck(radioWav, 150);

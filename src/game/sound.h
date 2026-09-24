@@ -46,6 +46,7 @@ public:
     void shift();
     void checkpoint();
     void fanfare();
+    void turbo();
     void menuMove();
     void menuSelect();
 

@@ -732,6 +732,19 @@ void buildArt(gs::VDP& vdp, Art& a) {
     Bitmap wide(32, 8);
     wide.rect(0, 0, 32, 8, 15);
     a.panelWide = gs::uploadMipped(vdp, wide);
+    // Turbo: an exhaust flame burst (yellow palette: 3 pale core, 1 yellow, 2 orange) and a speed streak.
+    Bitmap flame(48, 48);
+    for (int i = 0; i < 12; i++) {
+        float ang = i * TAU / 12, len = (i % 2) ? 14.0f : 22.0f;
+        flame.poly({{24 + std::cos(ang - 0.25f) * 6, 24 + std::sin(ang - 0.25f) * 6}, {24 + std::cos(ang) * len, 24 + std::sin(ang) * len},
+                    {24 + std::cos(ang + 0.25f) * 6, 24 + std::sin(ang + 0.25f) * 6}}, 2);
+    }
+    flame.ellipse(24, 24, 12, 12, 1);
+    flame.ellipse(24, 24, 6, 6, 3);
+    a.flame = gs::uploadMipped(vdp, flame);
+    Bitmap streak(2, 32);
+    streak.rect(0, 0, 2, 32, 1);
+    a.streak = gs::uploadMipped(vdp, streak);
     a.map = vdp.allocImage(72, 72);
 }
 

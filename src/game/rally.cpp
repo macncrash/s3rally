@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 
 namespace rally {
@@ -143,6 +144,8 @@ void Rally::startStage(int stage, bool withRivals) {
     noteShow_ = 0;
     newRecord_ = false;
     drifting_ = offroad_ = inWater_ = false;
+    boosts_ = turbo_ ? 3 : 0;
+    boostT_ = 0;
     rivals_.clear();
     if (withRivals) {
         int skill = 0;
@@ -195,11 +198,30 @@ void Rally::frame(gs::System& sys) {
     t_++;
     gs::Pad& pad = sys.pad;
     if (pad.pressed(gs::BTN_Z) && mode_ != Mode::Menu) tuneRadio();
+    // Secret code: type s3ga then Enter on the title screen or menu.
+    const std::string& typed = sys.typed;
+    if (typed.size() >= 5 && typed.compare(typed.size() - 5, 5, "s3ga\n") == 0) {
+        sys.typed.clear();
+        if (mode_ == Mode::Title || mode_ == Mode::Menu) {
+            turbo_ = true;
+            mode_ = Mode::Secret;
+            t_ = 0;
+            voice_->say(V_SECRET, true);
+            sfx_->fanfare();
+        }
+    }
     const bool confirm = pad.pressed(gs::BTN_START) || pad.pressed(gs::BTN_C);
     const bool back = pad.pressed(gs::BTN_MODE) || pad.pressed(gs::BTN_B);
     dim_ = false;
 
     switch (mode_) {
+        case Mode::Secret:
+            drive(autopilot(), true);
+            if (t_ > 60 && (confirm || back)) {
+                mode_ = Mode::Title;
+                t_ = 31;
+            }
+            break;
         case Mode::Title:
             drive(autopilot(), true);
             if (t_ > 30 && (pad.pressed(gs::BTN_START) || pad.pressed(gs::BTN_C))) {
@@ -290,6 +312,15 @@ void Rally::frame(gs::System& sys) {
             lapTime_ += DT;
             minTimer_ = std::min(minTimer_, timer_);
             if (type_ != GameType::TimeAttack && timer_ <= 5 && std::ceil(timer_) != std::ceil(timer_ + DT)) sfx_->beep(false);
+            if (turbo_ && pad.pressed(gs::BTN_TURBO) && boosts_ > 0 && boostT_ == 0) {
+                boosts_--;
+                boostT_ = 150;
+                shake_ = 6;
+                sfx_->turbo();
+                voice_->say(V_TURBO, true);
+                say({"TURBO!"}, 50, PAL_RED);
+            }
+            if (boostT_ > 0) boostT_--;
             drive(readPad(), false);
             if (timer_ <= 0 && mode_ == Mode::Race) gameOver();
             break;
@@ -479,7 +510,8 @@ void Rally::drive(const Input& in, bool attract) {
     float torque = rpmT < 0.25f ? 0.55f + rpmT * 1.8f : rpmT < 0.95f ? 1.0f : std::max(0.0f, 1 - (rpmT - 0.95f) * 20);
     if (manual_ && gear_ == 1 && pct < 0.05f) torque = 1;
 
-    const float top = MAX * car.top * sp.top;
+    const bool boosting = boostT_ > 0 && mode_ == Mode::Race;
+    const float top = MAX * car.top * sp.top * (boosting ? 1.4f : 1.0f);
     if (in.brake > 0) speed_ -= MAX * 1.1f * DT * in.brake;
     else if (in.throttle > 0) speed_ += (MAX / 4.0f) * car.accel * DT * (1 - 0.45f * pct) * torque * in.throttle;
     else speed_ -= MAX * 0.18f * DT;
@@ -488,6 +520,7 @@ void Rally::drive(const Input& in, bool attract) {
     if (drifting_) speed_ -= MAX * 0.06f * DT;
     if (offroad_ && speed_ > MAX * 0.45f) speed_ -= MAX * 0.9f * DT;
     if (inWater_ && speed_ > MAX * 0.4f) speed_ -= MAX * 1.1f * DT;
+    if (boosting && speed_ < top) speed_ += MAX * 0.8f * DT;  // the turbo shove
 
     // Scenery collisions.
     if (crashCool_ > 0) crashCool_--;
@@ -535,7 +568,7 @@ void Rally::drive(const Input& in, bool attract) {
         }
     }
 
-    speed_ = clampf(speed_, 0, MAX * 1.1f);
+    speed_ = clampf(speed_, 0, MAX * 1.5f);
     x_ = clampf(x_, -3.2f, 3.2f);
     const float prev = dist_;
     dist_ += speed_ * DT;
@@ -797,6 +830,21 @@ void Rally::render() {
         v.B.hscroll[y] = int16_t(std::lround((y + bvs < CLOUD_ROWS ? cloudX_ : skyX_) + shake));
         v.A.hscroll[y] = int16_t(std::lround(nearX_ + shake));
     }
+    // The secret screen hides the backdrop planes so the rainbow bars fill the sky.
+    v.A.enabled = v.B.enabled = mode_ != Mode::Secret;
+    if (mode_ == Mode::Secret) {
+        // Demo-scene raster tricks: rainbow sky bars and a road that wobbles like jelly.
+        for (int y = 0; y < gs::SCREEN_H; y++) {
+            const float h = std::fmod(y * 2.5f + t_ * 3.0f, 360.0f) / 60.0f;
+            const int i = int(h);
+            const float f = h - i;
+            const int q = int(15 * (1 - f)), u = int(15 * f);
+            const int rgb[6][3] = {{15, u, 0}, {q, 15, 0}, {0, 15, u}, {0, q, 15}, {u, 0, 15}, {15, 0, q}};
+            if (y < maxy) v.lineBackdrop[y] = gs::rgb4(rgb[i % 6][0], rgb[i % 6][1], rgb[i % 6][2]);
+            v.lineFog[y] = 0;
+            if (v.road[y].on) v.road[y].cx += std::sin(y * 0.09f + t_ * 0.12f) * (y - maxy) * 0.25f;
+        }
+    }
     if (dim_) v.setFogColor(gs::rgb4(0, 0, 1));
     else v.setFogColor(def.fog);
 
@@ -824,7 +872,7 @@ void Rally::drawWorld(int baseIndex, float basePct, float position) {
         if (dz < SEG * 0.5f || dz > SPRITE_DRAW * SEG) continue;
         items_.push_back({dz, nullptr, nullptr, &r});
     }
-    const bool showPlayer = mode_ != Mode::CarSelect;
+    const bool showPlayer = mode_ != Mode::CarSelect && mode_ != Mode::Secret;
     if (showPlayer) items_.push_back({PLAYER_Z, nullptr, nullptr, nullptr});
     std::sort(items_.begin(), items_.end(), [](const Item& a, const Item& b) { return a.d < b.d; });
 
@@ -884,6 +932,12 @@ void Rally::drawWorld(int baseIndex, float basePct, float position) {
             if (offroad_ && pct > 0.05f) bob = float(std::rand() % 3);
             else if (pct > 0.05f && frameNo_ % 8 < 4) bob = 1;
             const int frame = std::min(4, int(std::fabs(yaw_) + 0.35f));
+            if (boostT_ > 0) {  // exhaust flames, drawn over the car
+                const float h = w * CAR_ASPECT;
+                const float ex = HALF + (yaw_ < 0 ? -1 : 1) * 0.26f * w;
+                const float size = 26 + float(std::rand() % 14) + std::min(boostT_, 30) * 0.4f;
+                spr(art_.flame, ex, 222 - bob - 0.16f * h + size / 2, size, PAL_YELLOW, (frameNo_ & 2) != 0, 0);
+            }
             spr(art_.car[frame], HALF, 222 - bob, w * CAR_ASPECT, PAL_PLAYER, yaw_ < 0, dimFog);
             shadows.push_back({HALF, 225, w * 1.12f, 224});
             for (const Particle& p : parts_) {
@@ -959,6 +1013,7 @@ void Rally::drawHud() {
     if (!msg_.empty() && mode_ != Mode::Result && mode_ != Mode::Ending) {
         for (size_t i = 0; i < msg_.size(); i++) text(msg_[i], HALF, 58 + i * 22.0f, i == 0 ? 1.7f : 1.25f, msgPal_);
     }
+    drawTurboFx();
     const bool racing = mode_ == Mode::Countdown || mode_ == Mode::Race || mode_ == Mode::Pause || mode_ == Mode::Over ||
                         mode_ == Mode::Finish;
     if (!racing) {
@@ -966,6 +1021,10 @@ void Rally::drawHud() {
         return;
     }
     drawRadio(12);
+    if (turbo_) {  // boosts left
+        hud(33, 6, "TURBO", PAL_RED);
+        if (boosts_ > 0) text(std::string(size_t(boosts_), '>'), 312, 56, 1.2f, PAL_YELLOW, 1);
+    }
 
     if (mode_ == Mode::Countdown && t_ <= 180) {
         int n = 3 - (t_ - 1) / 60;
@@ -1025,6 +1084,7 @@ void Rally::drawMenus() {
     switch (mode_) {
         case Mode::Title: {
             spr(art_.logo, HALF, 118, 104, PAL_LOGO, false, 0);
+            if (turbo_ && frameNo_ % 40 < 30) hud(13, 27, "TURBO ENABLED", PAL_RED);
             if (frameNo_ % 60 < 40) text("PRESS START", HALF, 152, 1.5f, PAL_YELLOW);
             if (radio_->cardFrames() <= 0) {  // the station card uses this space while it shows
                 hud(10, 25, "(C) 2026 MACNCRASH", PAL_HUD);
@@ -1032,6 +1092,9 @@ void Rally::drawMenus() {
             }
             break;
         }
+        case Mode::Secret:
+            drawSecret();
+            break;
         case Mode::Menu: {
             spr(art_.logo, HALF, 80, 64, PAL_LOGO, false, 0);
             const char* items[4] = {"CHAMPIONSHIP", "PRACTICE", "TIME ATTACK", radio_->station() < 0 ? "RADIO  OFF" : "RADIO  ON"};
@@ -1112,6 +1175,44 @@ void Rally::drawMenus() {
         default:
             break;
     }
+}
+
+void Rally::drawTurboFx() {
+    if (boostT_ <= 0 || mode_ != Mode::Race) return;
+    // Speed streaks rushing past the edges of the screen.
+    for (int i = 0; i < 12; i++) {
+        const float side = (i & 1) ? 1.0f : -1.0f;
+        const float x = HALF + side * (95 + float(std::rand() % 70));
+        const float y = 60 + float(std::rand() % 140);
+        spr(art_.streak, x, y, 16 + float(std::rand() % 30), PAL_HUD, false, 5);
+    }
+}
+
+// The easter egg screen: unlocked by typing s3ga + Enter on the title.
+void Rally::drawSecret() {
+    static const int cycle[3] = {PAL_YELLOW, PAL_RED, PAL_HUD};
+    text("SECRET!", HALF, 6, 3, cycle[(t_ / 6) % 3]);
+    const char* lines[] = {"S3-16 DEVELOPER MODE", "", "TURBO BOOST UNLOCKED", "PRESS SPACE IN A RACE", "3 BOOSTS PER STAGE", "",
+                           "THANKS FOR PLAYING"};
+    for (int i = 0; i < 7; i++) hud(20 - int(std::strlen(lines[i])) / 2, 7 + i, lines[i], i == 2 ? PAL_YELLOW : PAL_HUD);
+    // A car spinning on the jelly road.
+    const int f = (t_ / 5) % 10;
+    const int frame = f < 5 ? f : 9 - f;
+    setCarPalette(*vdp_, PAL_PLAYER, carId_);
+    spr(art_.car[frame], HALF, 186, 60, PAL_PLAYER, (t_ / 50) % 2 == 1, 0);
+    // Sine-wave scroller.
+    static const std::string msg =
+        "     GREETINGS FROM MACNCRASH ... KEEP IT SIDEWAYS ... THE BLADE ROCKS 88.1 ... NEON FM NEVER SLEEPS ... "
+        "KOOL KEEPS ROLLING ... HOLD THE STEERING INTO THE BEND ... DON'T CUT! ... GAME OVER YEAH! ...     ";
+    const float adv = 16;
+    const float off = std::fmod(t_ * 2.0f, msg.size() * adv);
+    for (size_t i = 0; i < msg.size(); i++) {
+        const float x = gs::SCREEN_W - off + i * adv;
+        if (x < -14 || x > gs::SCREEN_W + 2 || msg[i] == ' ') continue;
+        const float y = 196 + std::sin(x * 0.035f + t_ * 0.12f) * 7;
+        text(std::string(1, msg[i]), x, y, 1.2f, cycle[(i / 4) % 3], -1);
+    }
+    if (t_ > 60 && frameNo_ % 60 < 40) hud(14, 14, "PRESS START", PAL_YELLOW);
 }
 
 // ================================================================ headless

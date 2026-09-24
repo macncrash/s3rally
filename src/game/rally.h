@@ -12,7 +12,7 @@
 
 namespace rally {
 
-enum class Mode { Title, Menu, StageSelect, CarSelect, Intro, Countdown, Race, Pause, Over, Finish, Result, Ending };
+enum class Mode { Title, Secret, Menu, StageSelect, CarSelect, Intro, Countdown, Race, Pause, Over, Finish, Result, Ending };
 enum class GameType { Championship, Practice, TimeAttack };
 
 struct Input {
@@ -84,6 +84,8 @@ private:
     void drawHud();
     void drawMenus();
     void drawMap();
+    void drawSecret();
+    void drawTurboFx();
     int fogFor(float dz) const;
     void spr(const gs::Mipped& m, float cx, float bottom, float h, int pal, bool flip, int fog, int clipY = 224, bool shadow = false);
     void text(const std::string& s, float x, float y, float scale, int pal, int align = 0);
@@ -113,6 +115,8 @@ private:
     bool manual_ = false;
     bool withRivals_ = true;
     bool dim_ = false;
+    bool turbo_ = false;  // unlocked by typing the secret code on the title screen
+    int boosts_ = 0, boostT_ = 0;
 
     // player
     float dist_ = 0, x_ = 0, latV_ = 0, steer_ = 0, speed_ = 0, yaw_ = 0;

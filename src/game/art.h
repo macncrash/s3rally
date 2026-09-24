@@ -33,6 +33,7 @@ struct Art {
     gs::Mipped pace[6];
     gs::Mipped logo;
     gs::Mipped rpm[4];  // green, yellow, red, off
+    gs::Mipped flame, streak;  // turbo effects
     gs::Mipped panel, panelWide;  // HUD backings (drawn as shadow sprites)
     gs::Image map;
     int fontTile[96] = {};
