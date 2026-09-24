@@ -11,6 +11,8 @@
 
 ![Gameplay](https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/gameplay.gif)
 
+🎮 **[Play it now in your browser](https://macncrash.github.io/s3garally/)**, with no install.
+
 ▶ **[Watch the full run with sound](https://macncrash.github.io/s3garally-site/)**: boot, menus, car select, and a Desert stage from 16th on the grid.
 
 </div>
@@ -61,6 +63,26 @@ generated at boot. There are no asset files.
   <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/shots/village.png" width="32%"> <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/shots/forest.png" width="32%"> <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/shots/mountain.png" width="32%"><br>
   <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/shots/desert.png" width="32%"> <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/shots/lakeside.png" width="32%"> <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/shots/radio.png" width="32%">
 </p>
+
+## Play in a browser
+
+**https://macncrash.github.io/s3garally/**
+
+The same C++ compiles to WebAssembly with Emscripten, so the browser runs the
+real game at 60 fps. There is no second codebase. The web build uses the
+browser's speech synthesis for the co-driver, saves records in local storage,
+and works with gamepads. Every push to `main` is built and tested in CI (native
+on Linux, then WebAssembly) and published to GitHub Pages.
+
+```bash
+make web        # needs Emscripten (em++); output in build-web/, serve it statically
+```
+
+The game runs entirely in the player's browser, so hosting it is just static
+files, and any web host or CDN will do. Online features only need a small
+server next to it. A shared leaderboard is a few HTTP endpoints. Head-to-head
+racing is a WebSocket relay that swaps car positions each frame, and the fixed
+60 Hz simulation makes lockstep input sync straightforward.
 
 ## Build and play
 

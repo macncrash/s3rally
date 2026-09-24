@@ -24,7 +24,8 @@ bool Pad::anyPressed() const {
 void Pad::latch() {
     for (int i = 0; i < BTN_COUNT; i++) {
         prev[i] = cur[i];
-        cur[i] = keys[i] || padBtn[i];
+        cur[i] = keys[i] || padBtn[i] || tapped[i];
+        tapped[i] = false;
     }
 }
 
@@ -282,7 +283,7 @@ void System::pollEvents() {
                     if (typed.size() > 16) typed.erase(0, typed.size() - 16);
                 }
                 int b = keyToButton(k);
-                if (b >= 0 && !alt) pad.keys[b] = true;  // Alt+Enter is fullscreen, not START
+                if (b >= 0 && !alt) pad.keys[b] = pad.tapped[b] = true;  // Alt+Enter is fullscreen, not START
                 break;
             }
             case SDL_KEYUP: {
