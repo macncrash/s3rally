@@ -193,6 +193,8 @@ static int versusTest(int stage, bool discover) {
     auto ca = std::make_unique<rally::Rally>(), cb = std::make_unique<rally::Rally>();
     sa->bootCart(*ca);
     sb->bootCart(*cb);
+    ca->testProfile("RADRACER");  // same display name on purpose: the IDs tell them apart
+    cb->testProfile("RADRACER");
     const uint16_t port = 47117;
     // A private discovery port keeps the test independent of anything else listening on 47016.
     ca->testDiscoveryPort(47216);
@@ -216,7 +218,11 @@ static int versusTest(int stage, bool discover) {
     std::printf("  host   finished %d  rank %d  time %.2f  saw opponent %d  opponent time %.2f\n", a.finished, a.rank, a.time, a.peerSeen, a.peerTime);
     std::printf("  client finished %d  rank %d  time %.2f  saw opponent %d  opponent time %.2f\n", b.finished, b.rank, b.time, b.peerSeen, b.peerTime);
     // Both must finish, see each other, agree on who won, and agree on each other's times.
-    const bool ok = a.finished && b.finished && a.peerSeen && b.peerSeen && a.rank != b.rank &&
+    std::printf("  names  host sees \"%s\" %s   client sees \"%s\" %s\n", a.peerName.c_str(), a.peerId.substr(0, 8).c_str(),
+                b.peerName.c_str(), b.peerId.substr(0, 8).c_str());
+    const bool namesOk = a.peerName == "RADRACER" && b.peerName == "RADRACER" && rally::validUuid(a.peerId) &&
+                         rally::validUuid(b.peerId) && a.peerId != b.peerId;
+    const bool ok = namesOk && a.finished && b.finished && a.peerSeen && b.peerSeen && a.rank != b.rank &&
                     (a.rank == 1) == (a.time < b.time) && std::fabs(a.peerTime - b.time) < 0.1f && std::fabs(b.peerTime - a.time) < 0.1f;
     std::printf("%s\n", ok ? "VERSUS OK" : "VERSUS FAILED");
     return ok ? 0 : 1;

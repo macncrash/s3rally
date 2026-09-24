@@ -142,6 +142,35 @@ is saved. Pads that support it rumble on crashes, bumps, rough ground and turbo,
 and a DualSense or DualShock light bar glows in your car's colour (red while the
 turbo burns).
 
+### Your player profile
+
+The first time you press Start you choose a **name** (up to 12 letters or numbers)
+and get a permanent **player ID**. Type it on a keyboard, or use a pad: up and down pick a
+letter, right adds it, left deletes. Names don't have to be unique, so two RADRACERs is
+fine, because the ID is what identifies a player. You can change your name any time under
+**PROFILE**, and the ID stays the same.
+
+Before the ID is created you're asked to agree. With your OK the game requests a
+random UUID from [urandom.ai](https://urandom.ai) (`GET /v1/random/uuid`, with
+the certificate verified). Only the request is sent, never your name. If the service
+can't be reached, or you choose **USE AN OFFLINE ID**, a UUID is made from this
+machine's `/dev/urandom` (or the browser's crypto) instead, and the profile records
+which source it came from.
+
+The profile is a small `key=value` file, the start of a save game:
+
+```
+name=RADRACER
+id=6fbadb6b-e3f4-48b4-a729-725a97bb5705
+id_source=urandom.ai
+created=2026-09-24T06:00:00Z
+```
+
+It lives next to your records in the game's data folder, or in localStorage in the
+browser. In head-to-head both names and IDs are exchanged. Names show in the lobby,
+on the pairing screen, above the other player's car and on the results, and the IDs
+are there for a future internet leaderboard.
+
 ### Head to head (LAN)
 
 Race a friend on the same network. Choose **HEAD TO HEAD**, pick a car, then one
@@ -150,11 +179,14 @@ host themselves automatically, so the joiner just picks one from the list. Each 
 drives its own car and streams its position to the other 60 times a second. This
 is the same shape a future internet server will use. It needs the desktop build,
 because browsers can't open UDP sockets. It uses UDP ports 47016 (discovery) and 47017.
+On macOS, the first time you host or join, the system asks whether S3 may accept
+incoming network connections: choose **Allow**, or the other machine can't reach
+you. Set `S3_NET_DEBUG=1` to log the protocol if a LAN game won't connect.
 
 ### Version
 
 The title, menu, pause and controls screens show the version and build,
-for example `V1.4.0 (a1b2c3d)`. `./s3 --version` prints it too.
+for example `V1.5.0 (a1b2c3d)`. `./s3 --version` prints it too.
 
 **Rumour has it** the developers left something on the title screen for anyone who types the right
 four characters and presses Enter. Whatever it is, it comes with three shots of turbo per stage.

@@ -46,7 +46,7 @@ static int keyToButton(SDL_Keycode k) {
         case SDLK_w: return BTN_Y;
         case SDLK_e: case SDLK_TAB: return BTN_Z;
         case SDLK_RETURN: return BTN_START;
-        case SDLK_ESCAPE: case SDLK_BACKSPACE: return BTN_MODE;
+        case SDLK_ESCAPE: return BTN_MODE;
         default: return -1;
     }
 }
@@ -284,6 +284,8 @@ void System::pollEvents() {
                     // Remember what was typed, for cheat codes.
                     if ((k >= SDLK_a && k <= SDLK_z) || (k >= SDLK_0 && k <= SDLK_9)) typed += char(k);
                     else if (k == SDLK_RETURN && !alt) typed += '\n';
+                    else if (k == SDLK_SPACE) typed += ' ';
+                    else if (k == SDLK_BACKSPACE) typed += '\b';
                     if (typed.size() > 16) typed.erase(0, typed.size() - 16);
                 }
                 int b = keyToButton(k);

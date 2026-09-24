@@ -88,6 +88,7 @@ void Rally::init(gs::System& sys) {
     voice_ = std::make_unique<CoDriver>(sys.apu);
     if (!sys.headless || sys.scripted) voice_->loadAsync(sys.dataPath("voice/"));
     loadRecords();
+    profile_ = Profile::parse(sys.loadBlob("profile.txt"));
     flakes_.resize(70);
     for (auto& f : flakes_) f = {float(std::rand() % 320), float(std::rand() % 224), 1 + (std::rand() % 3) * 0.5f};
     stage_ = -1;
@@ -212,7 +213,7 @@ void Rally::frame(gs::System& sys) {
     frameNo_++;
     t_++;
     gs::Pad& pad = sys.pad;
-    if (pad.pressed(gs::BTN_Z) && mode_ != Mode::Menu) tuneRadio();
+    if (pad.pressed(gs::BTN_Z) && mode_ != Mode::Menu && mode_ != Mode::Profile) tuneRadio();  // E is a letter in name entry
     // Secret code: type s3ga then Enter on the title screen or menu.
     const std::string& typed = sys.typed;
     if (typed.size() >= 5 && typed.compare(typed.size() - 5, 5, "s3ga\n") == 0) {
@@ -240,18 +241,22 @@ void Rally::frame(gs::System& sys) {
         case Mode::Title:
             drive(autopilot(), true);
             if (t_ > 30 && (pad.pressed(gs::BTN_START) || pad.pressed(gs::BTN_C))) {
-                mode_ = Mode::Menu;
-                menuSel_ = 0;
-                t_ = 0;
                 sfx_->menuSelect();
+                if (!profile_.valid()) {
+                    startProfile(false);  // first time: who are you?
+                } else {
+                    mode_ = Mode::Menu;
+                    menuSel_ = 0;
+                    t_ = 0;
+                }
             }
             if (t_ > 60 * 45) toTitle();
             break;
         case Mode::Menu:
             dim_ = true;
             drive(autopilot(), true);
-            if (pad.pressed(gs::BTN_UP)) { menuSel_ = (menuSel_ + 5) % 6; sfx_->menuMove(); }
-            if (pad.pressed(gs::BTN_DOWN)) { menuSel_ = (menuSel_ + 1) % 6; sfx_->menuMove(); }
+            if (pad.pressed(gs::BTN_UP)) { menuSel_ = (menuSel_ + 6) % 7; sfx_->menuMove(); }
+            if (pad.pressed(gs::BTN_DOWN)) { menuSel_ = (menuSel_ + 1) % 7; sfx_->menuMove(); }
             if (back) { mode_ = Mode::Title; t_ = 31; }
             else if (confirm && t_ > 5) {
                 sfx_->menuSelect();
@@ -269,7 +274,8 @@ void Rally::frame(gs::System& sys) {
                             t_ = 0;
                         }
                         break;
-                    case 4: mode_ = Mode::Controls; ctlSel_ = 0; t_ = 0; break;
+                    case 4: startProfile(true); break;
+                    case 5: mode_ = Mode::Controls; ctlSel_ = 0; t_ = 0; break;
                     default: tuneRadio(); break;
                 }
             }
@@ -283,6 +289,11 @@ void Rally::frame(gs::System& sys) {
             dim_ = true;
             drive(autopilot(), true);
             updateControls(confirm, back);
+            break;
+        case Mode::Profile:
+            dim_ = true;
+            drive(autopilot(), true);
+            updateProfile(pad.pressed(gs::BTN_START), pad.pressed(gs::BTN_MODE));  // letters are for typing here
             break;
         case Mode::StageSelect:
             dim_ = true;
@@ -970,6 +981,8 @@ void Rally::drawWorld(int baseIndex, float basePct, float position) {
             const int frame = std::min(4, int(std::fabs(seg.curve) / 1.6f));
             const float bob = (r.speed > 0 && ((frameNo_ + int(r.top * 97)) % 6) < 3) ? std::max(1.0f, w / 60) : 0;
             spr(art_.car[frame], cx, sy - bob, w * CAR_ASPECT, PAL_RIVAL + r.pal, seg.curve < 0, fog, int(seg.clip));
+            if (r.remote && fog < 12 && !versus_.peerName.empty() && w > 12)  // name tag over the other player's car
+                text(versus_.peerName, cx, sy - w * CAR_ASPECT - 12, std::clamp(w / 90.0f, 0.5f, 0.9f), PAL_YELLOW);
             if (SURF[seg.surface].dusty && r.speed > MAX * 0.3f && fog < 14)
                 spr(art_.puff, cx + ((frameNo_ / 3) % 2 ? w * 0.3f : -w * 0.3f), sy - w * 0.05f, w * 0.55f, PAL_FX, false, fog + 2, int(seg.clip));
             shadows.push_back({cx, sy + w * 0.03f, w * 1.1f, int(seg.clip)});
@@ -1158,15 +1171,19 @@ void Rally::drawMenus() {
         case Mode::Controls:
             drawControls();
             break;
+        case Mode::Profile:
+            drawProfile();
+            break;
         case Mode::Menu: {
             spr(art_.logo, HALF, 70, 56, PAL_LOGO, false, 0);
-            const char* items[6] = {"CHAMPIONSHIP", "PRACTICE", "TIME ATTACK", "HEAD TO HEAD", "CONTROLS",
+            const char* items[7] = {"CHAMPIONSHIP", "PRACTICE", "TIME ATTACK", "HEAD TO HEAD", "PROFILE", "CONTROLS",
                                     radio_->station() < 0 ? "RADIO  OFF" : "RADIO  ON"};
-            for (int i = 0; i < 6; i++) text(items[i], HALF, 80 + i * 20.0f, 1.1f, i == menuSel_ ? PAL_YELLOW : PAL_HUD);
-            text(">", 58, 80 + menuSel_ * 20.0f, 1.1f, PAL_YELLOW, -1);
-            const char* help[6] = {"3 STAGES AND A SECRET ONE.", "RACE ANY STAGE.", "SOLO. NO TIME LIMIT.",
+            for (int i = 0; i < 7; i++) text(items[i], HALF, 78 + i * 17.0f, 1.0f, i == menuSel_ ? PAL_YELLOW : PAL_HUD);
+            text(">", 64, 78 + menuSel_ * 17.0f, 1.0f, PAL_YELLOW, -1);
+            const std::string who = "YOUR NAME: " + profile_.name;
+            const char* help[7] = {"3 STAGES AND A SECRET ONE.", "RACE ANY STAGE.", "SOLO. NO TIME LIMIT.",
                                    Versus::available() ? "RACE A FRIEND ON YOUR NETWORK." : "LAN PLAY NEEDS THE DESKTOP VERSION.",
-                                   "SEE AND REMAP BUTTONS.", "CHANGE STATION. TAB IN GAME."};
+                                   who.c_str(), "SEE AND REMAP BUTTONS.", "CHANGE STATION. TAB IN GAME."};
             hud(39 - int(std::strlen(S3_VERSION_STRING)), 27, S3_VERSION_STRING, PAL_HUD);
             hud(20 - int(std::string(help[menuSel_]).size()) / 2, 25, help[menuSel_], PAL_HUD);
             break;
@@ -1217,8 +1234,11 @@ void Rally::drawMenus() {
             if (type_ == GameType::Versus) {
                 text(rank_ == 1 ? "YOU WIN!" : "YOU LOSE", HALF, 30, 2, rank_ == 1 ? PAL_YELLOW : PAL_RED);
                 const CarState& p = versus_.peer;
-                hud(9, 11, "YOU       " + fmtTime(raceTime_), PAL_YELLOW);
-                hud(9, 12, "OPPONENT  " + (opponentLeft_ && !p.finished ? std::string("LEFT") : p.finished ? fmtTime(p.time) : std::string("RACING...")), PAL_HUD);
+                std::string me = profile_.name, them = versus_.peerName.empty() ? std::string("OPPONENT") : versus_.peerName;
+                me.resize(13, ' ');
+                them.resize(13, ' ');
+                hud(7, 11, me + fmtTime(raceTime_), PAL_YELLOW);
+                hud(7, 12, them + (opponentLeft_ && !p.finished ? std::string("LEFT") : p.finished ? fmtTime(p.time) : std::string("RACING...")), PAL_HUD);
             } else {
                 text(withRivals_ ? (rank_ == 1 ? "YOU WIN!" : "STAGE CLEAR") : "FINISH", HALF, 30, 2, PAL_YELLOW);
                 if (withRivals_) text("POSITION " + ordinal(rank_), HALF, 70, 1.5f, PAL_HUD);
@@ -1293,6 +1313,8 @@ void Rally::drawSecret() {
 // Lobby steps: 0 choose host/join, 1 host picks a stage, 2 host waits,
 // 3 join browses games, 4 joining, 5 connected and about to start.
 void Rally::updateLobby(bool confirm, bool back) {
+    versus_.myName = profile_.name;  // who we are to the other player
+    versus_.myId = profile_.id;
     const gs::Pad& pad = sys_->pad;
     auto fail = [&](const char* why) {
         versus_.stop();
@@ -1435,6 +1457,7 @@ void Rally::drawLobby() {
         }
         case 2:
             hud(10, 8, "WAITING FOR A RIVAL", frameNo_ % 60 < 40 ? PAL_YELLOW : PAL_HUD);
+            hud(20 - int(profile_.name.size() + 5) / 2, 5, "HOST " + profile_.name, PAL_HUD);
             hud(20 - int(std::strlen(stageDef(stage_).name)) / 2, 11, stageDef(stage_).name, PAL_HUD);
             if (!ip.empty()) hud(20 - int(ip.size() + 9) / 2, 14, "YOUR IP  " + ip, PAL_HUD);
             hud(8, 22, "ON THE OTHER MACHINE CHOOSE", PAL_HUD);
@@ -1445,7 +1468,9 @@ void Rally::drawLobby() {
             if (versus_.hosts.empty()) hud(12, 12, "SEARCHING...", frameNo_ % 60 < 40 ? PAL_YELLOW : PAL_HUD);
             for (size_t i = 0; i < versus_.hosts.size() && i < 8; i++) {
                 const HostInfo& h = versus_.hosts[i];
-                std::string line = h.addr.str() + "  " + stageDef(h.stage).name;
+                std::string who = h.name.empty() ? h.addr.str() : h.name;
+                who.resize(13, ' ');
+                std::string line = who + stageDef(h.stage).name;
                 if (h.version != S3_VERSION) line += "  V" + h.version;
                 hud(6, 9 + int(i) * 2, (int(i) == lobbySel_ ? "> " : "  ") + line, int(i) == lobbySel_ ? PAL_YELLOW : PAL_HUD);
             }
@@ -1455,12 +1480,150 @@ void Rally::drawLobby() {
             hud(13, 12, "CONNECTING...", frameNo_ % 60 < 40 ? PAL_YELLOW : PAL_HUD);
             break;
         case 5:
-            text("RIVAL FOUND!", HALF, 70, 1.5f, PAL_YELLOW);
+            text("RIVAL FOUND!", HALF, 54, 1.5f, PAL_YELLOW);
+            text(profile_.name + " VS " + (versus_.peerName.empty() ? "?" : versus_.peerName), HALF, 84, 1.0f, PAL_HUD);
             hud(20 - int(std::strlen(stageDef(versus_.stage).name)) / 2, 14, stageDef(versus_.stage).name, PAL_HUD);
             hud(20 - int(std::strlen(carSpec(versus_.peer.car).name)) / 2, 16, carSpec(versus_.peer.car).name, PAL_HUD);
             break;
     }
     if (lobbyStep_ != 5) hud(8, 26, "ENTER SELECT   ESC BACK", PAL_HUD);
+}
+
+// ================================================================ profile
+
+// Steps: 0 enter a name, 1 agree to the ID, 2 getting the ID, 3 welcome.
+void Rally::startProfile(bool fromMenu) {
+    mode_ = Mode::Profile;
+    profFromMenu_ = fromMenu;
+    profStep_ = 0;
+    profSel_ = 0;
+    nameEdit_ = profile_.name;
+    pendingChar_ = 'A';
+    sys_->typed.clear();
+    t_ = 0;
+}
+
+void Rally::updateProfile(bool confirm, bool back) {
+    const gs::Pad& pad = sys_->pad;
+    auto leave = [&] {
+        mode_ = profile_.valid() ? Mode::Menu : Mode::Title;
+        t_ = mode_ == Mode::Title ? 31 : 0;
+    };
+    switch (profStep_) {
+        case 0: {
+            // Keyboard: just type. Controller: up/down picks a letter, right adds it, left deletes.
+            static const std::string charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -.!";
+            for (char c : sys_->typed) {
+                if (c == '\b') {
+                    if (!nameEdit_.empty()) nameEdit_.pop_back();
+                } else if (char n = nameChar(c); n && nameEdit_.size() < PROFILE_NAME_MAX
+                                                    && !(n == ' ' && (nameEdit_.empty() || nameEdit_.back() == ' '))) {
+                    nameEdit_ += n;
+                }
+            }
+            sys_->typed.clear();
+            size_t at = charset.find(pendingChar_);
+            if (at == std::string::npos) at = 0;
+            if (pad.pressed(gs::BTN_UP)) pendingChar_ = charset[(at + charset.size() - 1) % charset.size()];
+            if (pad.pressed(gs::BTN_DOWN)) pendingChar_ = charset[(at + 1) % charset.size()];
+            if (pad.pressed(gs::BTN_RIGHT) && nameEdit_.size() < PROFILE_NAME_MAX) nameEdit_ += pendingChar_;
+            if (pad.pressed(gs::BTN_LEFT) && !nameEdit_.empty()) nameEdit_.pop_back();
+            while (!nameEdit_.empty() && nameEdit_.back() == ' ' && confirm) nameEdit_.pop_back();
+            if (back) {
+                leave();
+            } else if (confirm && t_ > 5 && !nameEdit_.empty()) {
+                sfx_->menuSelect();
+                if (profile_.valid()) {  // renaming: the ID stays the same
+                    profile_.name = nameEdit_;
+                    sys_->saveBlob("profile.txt", profile_.serialize());
+                    profStep_ = 3;
+                } else {
+                    profStep_ = 1;
+                }
+                t_ = 0;
+            }
+            break;
+        }
+        case 1:
+            if (pad.pressed(gs::BTN_UP)) { profSel_ = (profSel_ + 2) % 3; sfx_->menuMove(); }
+            if (pad.pressed(gs::BTN_DOWN)) { profSel_ = (profSel_ + 1) % 3; sfx_->menuMove(); }
+            if (back || (confirm && t_ > 5 && profSel_ == 2)) {
+                profStep_ = 0;
+                t_ = 0;
+            } else if (confirm && t_ > 5) {
+                sfx_->menuSelect();
+                fetch_ = std::make_unique<IdFetcher>();
+                fetch_->start(profSel_ == 0);  // 0: ask urandom.ai, 1: offline ID
+                profStep_ = 2;
+                t_ = 0;
+            }
+            break;
+        case 2:
+            if (fetch_ && fetch_->done()) {
+                profile_.name = nameEdit_;
+                profile_.id = fetch_->id();
+                profile_.idSource = fetch_->source();
+                profile_.created = utcNow();
+                sys_->saveBlob("profile.txt", profile_.serialize());
+                fetch_.reset();
+                sfx_->checkpoint();
+                profStep_ = 3;
+                t_ = 0;
+            }
+            break;
+        default:
+            if ((confirm || back) && t_ > 20) {
+                mode_ = Mode::Menu;
+                menuSel_ = 0;
+                t_ = 0;
+            }
+            break;
+    }
+}
+
+void Rally::drawProfile() {
+    text("PLAYER PROFILE", HALF, 12, 1.5f, PAL_YELLOW);
+    switch (profStep_) {
+        case 0: {
+            hud(20 - 9, 7, profFromMenu_ ? "CHANGE YOUR NAME" : "ENTER YOUR NAME", PAL_HUD);
+            std::string shown = nameEdit_;
+            if (nameEdit_.size() < PROFILE_NAME_MAX && frameNo_ % 40 < 26) shown += sys_->ctl.connected ? pendingChar_ : '_';
+            text(shown.empty() ? " " : shown, HALF, 84, 2, PAL_YELLOW);
+            hud(9, 17, "UP TO 12 LETTERS OR NUMBERS", PAL_HUD);
+            hud(6, 19, "NAMES DON'T HAVE TO BE UNIQUE", PAL_HUD);
+            if (sys_->ctl.connected) hud(4, 22, "PAD: UP/DOWN LETTER  RIGHT ADD  LEFT DEL", PAL_HUD);
+            hud(6, 24, "TYPE YOUR NAME, THEN PRESS ENTER", PAL_HUD);
+            hud(15, 26, "ESC BACK", PAL_HUD);
+            break;
+        }
+        case 1: {
+            hud(20 - int(nameEdit_.size() + 6) / 2, 6, "NAME: " + nameEdit_, PAL_YELLOW);
+            const char* lines[] = {"YOU GET A UNIQUE PLAYER ID. IT STAYS", "THE SAME EVEN IF YOU CHANGE YOUR NAME.",
+                                   "", "THE ID COMES FROM URANDOM.AI. ONLY A", "RANDOM ID IS REQUESTED: YOUR NAME IS",
+                                   "NEVER SENT. YOUR NAME AND ID ARE SAVED", "ON THIS DEVICE AND SHOWN ONLY TO",
+                                   "PLAYERS YOU RACE."};
+            for (int i = 0; i < 8; i++) hud(1, 8 + i, lines[i], PAL_HUD);
+            const char* opts[] = {"AGREE - GET MY ID", "USE AN OFFLINE ID", "BACK"};
+            for (int i = 0; i < 3; i++) {
+                hud(9, 19 + i * 2, i == profSel_ ? ">" : " ", PAL_YELLOW);
+                hud(11, 19 + i * 2, opts[i], i == profSel_ ? PAL_YELLOW : PAL_HUD);
+            }
+            break;
+        }
+        case 2:
+            hud(10, 12, profSel_ == 0 ? "CONTACTING URANDOM.AI" : "MAKING YOUR ID", frameNo_ % 40 < 26 ? PAL_YELLOW : PAL_HUD);
+            break;
+        default: {
+            text("WELCOME", HALF, 50, 1.5f, PAL_HUD);
+            text(profile_.name, HALF, 78, 2, PAL_YELLOW);
+            hud(20 - 10, 15, "PLAYER ID " + profile_.shortId(), PAL_HUD);
+            const std::string src = profile_.idSource == "urandom.ai" ? "ISSUED BY URANDOM.AI"
+                                                                      : "OFFLINE ID (FROM THIS DEVICE)";
+            hud(20 - int(src.size()) / 2, 17, src, PAL_HUD);
+            if (t_ > 20 && frameNo_ % 60 < 40) hud(14, 24, "PRESS START", PAL_YELLOW);
+            break;
+        }
+    }
 }
 
 // ================================================================ controls
@@ -1596,6 +1759,8 @@ void Rally::padFeedback() {
 
 bool Rally::testHost(int stage, uint16_t port) {
     carId_ = 0;
+    versus_.myName = profile_.name;
+    versus_.myId = profile_.id;
     if (!versus_.host(stage, carId_, port)) return false;
     type_ = GameType::Versus;
     mode_ = Mode::Lobby;
@@ -1605,6 +1770,8 @@ bool Rally::testHost(int stage, uint16_t port) {
 }
 
 bool Rally::testJoin(const std::string& ip, uint16_t port, int car) {
+    versus_.myName = profile_.name;
+    versus_.myId = profile_.id;
     if (ip == "discover") {  // find the host through its LAN broadcast, like the lobby does
         carId_ = car;
         type_ = GameType::Versus;
@@ -1626,7 +1793,8 @@ bool Rally::testJoin(const std::string& ip, uint16_t port, int car) {
 }
 
 Rally::VersusReport Rally::versusReport() const {
-    return {mode_ == Mode::Finish || mode_ == Mode::Result, versus_.peerSeen, versus_.peer.finished, rank_, raceTime_, versus_.peer.time};
+    return {mode_ == Mode::Finish || mode_ == Mode::Result, versus_.peerSeen, versus_.peer.finished, versus_.peerName, versus_.peerId,
+            rank_, raceTime_, versus_.peer.time};
 }
 
 // ================================================================ headless

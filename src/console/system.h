@@ -94,7 +94,7 @@ public:
     uint32_t fb[SCREEN_W * SCREEN_H] = {};
     bool headless;
     bool scripted = false;  // headless, but input comes from the pad (demo recording)
-    std::string typed;  // recent keyboard letters/digits, "\n" for Enter (for cheat codes)
+    std::string typed;  // recent keyboard letters/digits, ' ', "\n" Enter, "\b" Backspace (cheat codes, name entry)
     bool crt = true;
 
 private:

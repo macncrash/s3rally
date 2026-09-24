@@ -6,9 +6,9 @@
 // the shape a future internet server will keep: only the transport changes.
 //
 // Protocol (one UDP datagram per message, see Packet):
-//   ANNOUNCE  host -> broadcast   "a game is open": stage, host car, game port, version
-//   HELLO     client -> host      "let me in": client car (resent until welcomed)
-//   WELCOME   host -> client      stage and host car
+//   ANNOUNCE  host -> broadcast   "a game is open": stage, host car, game port, version, host name + ID
+//   HELLO     client -> host      "let me in": client car, name + ID (resent until welcomed)
+//   WELCOME   host -> client      stage, host car, host name + ID
 //   GO        host -> client      start the countdown now (sent a few times)
 //   STATE     both ways, 60 Hz    position, speed, lap, finished, race time
 //   BYE       either              leaving
@@ -27,6 +27,7 @@ struct HostInfo {
     gs::NetAddr addr;  // host's game port
     int stage = 0, car = 0;
     std::string version;
+    std::string name, id;  // host player
     int age = 0;  // frames since last announcement
 };
 
@@ -59,6 +60,8 @@ public:
     bool peerSeen = false;     // received at least one STATE
     int framesSincePeer = 0;   // for extrapolation and timeouts
     std::vector<HostInfo> hosts;
+    std::string myName, myId;      // our profile, sent when we announce, join or welcome
+    std::string peerName, peerId;  // theirs
     uint16_t gamePort = 0;
     uint16_t discoveryPort = DISCOVERY_PORT;  // overridable (tests)
 

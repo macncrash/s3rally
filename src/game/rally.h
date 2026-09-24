@@ -9,12 +9,13 @@
 #include "radio.h"
 #include "sound.h"
 #include "stages.h"
+#include "profile.h"
 #include "versus.h"
 #include "version.h"
 
 namespace rally {
 
-enum class Mode { Title, Secret, Menu, Lobby, Controls, StageSelect, CarSelect, Intro, Countdown, Race, Pause, Over, Finish, Result, Ending };
+enum class Mode { Title, Secret, Menu, Lobby, Controls, Profile, StageSelect, CarSelect, Intro, Countdown, Race, Pause, Over, Finish, Result, Ending };
 enum class GameType { Championship, Practice, TimeAttack, Versus };
 
 struct Input {
@@ -57,10 +58,16 @@ public:
     // Head-to-head test hooks: skip the menus and host or join directly.
     bool testHost(int stage, uint16_t port);
     void testDiscoveryPort(uint16_t p) { versus_.discoveryPort = p; }
+    void testProfile(const std::string& name) {
+        profile_.name = name;
+        profile_.id = localUuid();
+        profile_.idSource = "local";
+    }
     uint16_t testHostPort() const { return versus_.gamePort; }  // may differ if the first port was busy
     bool testJoin(const std::string& ip, uint16_t port, int car);
     struct VersusReport {
         bool finished, peerSeen, peerFinished;
+        std::string peerName, peerId;
         int rank;
         float time, peerTime;
     };
@@ -104,6 +111,9 @@ private:
     void updateLobby(bool confirm, bool back);
     void updateControls(bool confirm, bool back);
     void updateVersus();
+    void startProfile(bool fromMenu);
+    void updateProfile(bool confirm, bool back);
+    void drawProfile();
     void startVersusRace();
     void padFeedback();
     bool timed() const { return type_ == GameType::Championship || type_ == GameType::Practice; }
@@ -138,6 +148,12 @@ private:
     bool withRivals_ = true;
     bool dim_ = false;
     Versus versus_;
+    Profile profile_;
+    std::unique_ptr<IdFetcher> fetch_;
+    std::string nameEdit_;
+    char pendingChar_ = 'A';
+    int profStep_ = 0, profSel_ = 0;
+    bool profFromMenu_ = false;
     int lobbyStep_ = 0, lobbySel_ = 0, ctlSel_ = 0;
     bool rebinding_ = false;
     std::string toast_;

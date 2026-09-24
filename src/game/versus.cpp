@@ -1,6 +1,8 @@
 #include "versus.h"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include "version.h"
@@ -9,9 +11,16 @@ namespace rally {
 
 namespace {
 
-constexpr uint8_t PROTOCOL = 1;
+constexpr uint8_t PROTOCOL = 2;  // 2: players' names and IDs
 enum : uint8_t { ANNOUNCE = 1, HELLO, WELCOME, GO, STATE, BYE };
 constexpr int TIMEOUT_FRAMES = 60 * 4;
+
+// S3_NET_DEBUG=1 logs the head-to-head protocol to stderr.
+bool netDebug() {
+    static const bool on = std::getenv("S3_NET_DEBUG") != nullptr;
+    return on;
+}
+#define NETLOG(...) do { if (netDebug()) std::fprintf(stderr, "[net] " __VA_ARGS__); } while (0)
 
 #pragma pack(push, 1)
 struct Packet {
@@ -21,9 +30,13 @@ struct Packet {
     uint32_t seq;
     float dist, x, speed, yaw, time;
     char version[16];
+    char name[13];  // display name, nul-terminated
+    char id[37];    // player ID (UUID), nul-terminated
 };
 #pragma pack(pop)
-static_assert(sizeof(Packet) == 52, "wire format changed");
+static_assert(sizeof(Packet) == 102, "wire format changed");
+
+std::string field(const char* s, size_t cap) { return std::string(s, strnlen(s, cap)); }
 
 Packet make(uint8_t type) {
     Packet p{};
@@ -57,7 +70,9 @@ bool Versus::host(int st, int car, uint16_t port) {
 
 bool Versus::search() {
     stop();
+    NETLOG("client searching on discovery port %d\n", discoveryPort);
     if (!disco_.open(discoveryPort, true) || !game_.open(0)) {
+        NETLOG("client could not open sockets\n");
         stop();
         return false;
     }
@@ -82,6 +97,8 @@ void Versus::stop() {
     phase = Phase::Idle;
     hosts.clear();
     peer = CarState{};
+    peerName.clear();
+    peerId.clear();
     peerSeen = false;
     framesSincePeer = 0;
     goToSend_ = 0;
@@ -90,9 +107,12 @@ void Versus::stop() {
 }
 
 void Versus::sendType(int type) {
+    NETLOG("%s sends type %d to %s:%d\n", isHost ? "host" : "client", type, peerAddr_.str().c_str(), peerAddr_.port);
     Packet p = make(uint8_t(type));
     p.stage = uint8_t(stage);
     p.car = uint8_t(myCar);
+    std::strncpy(p.name, myName.c_str(), sizeof p.name - 1);
+    std::strncpy(p.id, myId.c_str(), sizeof p.id - 1);
     game_.send(peerAddr_, &p, sizeof p);
 }
 
@@ -124,6 +144,7 @@ void Versus::handle(const void* data, int len, const gs::NetAddr& from) {
     Packet p;
     std::memcpy(&p, data, sizeof p);
     if (std::memcmp(p.magic, "GSR1", 4) != 0 || p.proto != PROTOCOL) return;
+    NETLOG("%s got type %d from %s:%d (phase %d)\n", isHost ? "host" : "client", p.type, from.str().c_str(), from.port, int(phase));
     switch (p.type) {
         case ANNOUNCE: {
             if (phase != Phase::Searching) break;
@@ -132,7 +153,9 @@ void Versus::handle(const void* data, int len, const gs::NetAddr& from) {
             if (it == hosts.end()) it = hosts.insert(hosts.end(), HostInfo{a});
             it->stage = p.stage;
             it->car = p.car;
-            it->version.assign(p.version, strnlen(p.version, sizeof p.version));
+            it->version = field(p.version, sizeof p.version);
+            it->name = field(p.name, sizeof p.name);
+            it->id = field(p.id, sizeof p.id);
             it->age = 0;
             break;
         }
@@ -141,6 +164,8 @@ void Versus::handle(const void* data, int len, const gs::NetAddr& from) {
             if (phase == Phase::Hosting || (phase == Phase::Ready && from == peerAddr_)) {
                 peerAddr_ = from;
                 peer.car = p.car;
+                peerName = field(p.name, sizeof p.name);
+                peerId = field(p.id, sizeof p.id);
                 phase = Phase::Ready;
                 framesSincePeer = 0;
                 sendType(WELCOME);
@@ -150,6 +175,8 @@ void Versus::handle(const void* data, int len, const gs::NetAddr& from) {
             if (phase == Phase::Joining && from == peerAddr_) {
                 stage = p.stage;
                 peer.car = p.car;
+                peerName = field(p.name, sizeof p.name);
+                peerId = field(p.id, sizeof p.id);
                 phase = Phase::Ready;
                 framesSincePeer = 0;
             }
@@ -193,7 +220,10 @@ void Versus::tick() {
                 p.stage = uint8_t(stage);
                 p.car = uint8_t(myCar);
                 p.port = gamePort;
+                std::strncpy(p.name, myName.c_str(), sizeof p.name - 1);
+                std::strncpy(p.id, myId.c_str(), sizeof p.id - 1);
                 disco_.broadcast(discoveryPort, &p, sizeof p);
+                NETLOG("host announces on %d (game port %d)\n", discoveryPort, gamePort);
             }
             break;
         case Phase::Searching:
