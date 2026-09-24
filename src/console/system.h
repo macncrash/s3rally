@@ -70,6 +70,11 @@ public:
     // Windowed run with boot ROM; returns when the window closes.
     int run(Cart& cart);
 
+    // Read a controller into a pad (also used by the multi-console quad mode).
+    static void readController(_SDL_GameController* c, Controller& ctl, Pad& pad, bool trigWas[2]);
+    static int keyButton(int sdlKey);  // keyboard key -> Button, or -1
+    void biosPowerOn() { biosInit(); }
+
     // Headless helpers (tests, simulations, screenshots).
     void bootCart(Cart& cart);
     void powerOn(Cart& cart);  // headless power-on through the boot ROM

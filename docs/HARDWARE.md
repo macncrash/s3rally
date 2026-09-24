@@ -56,7 +56,7 @@ are available as `axisX`, `accel` and `brake`.
 
 ## Link port
 
-A non-blocking UDP interface (`src/console/link.h`) for local-network play:
+A non-blocking UDP interface (`src/console/link.h`) for network play, on a LAN or over the internet by address:
 open a port, send, broadcast to every interface, poll for datagrams. It isn't
 available in the browser build.
 

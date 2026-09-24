@@ -27,7 +27,8 @@ struct Rival {
     float dist = 0, x = 0, lane = 0, speed = 0, top = 0;
     int pal = 0;
     const char* name = "";
-    bool remote = false;  // driven by the other player over the network, not by the AI
+    bool remote = false;  // driven by another player over the network, not by the AI
+    int slot = -1;        // that player's slot in the session
 };
 
 struct Particle {
@@ -56,7 +57,7 @@ public:
     SimReport simulateStage(int stage, std::vector<std::string>* shots, const std::string& shotDir);
     int tilesUsed() const { return tilesUsed_; }
     // Head-to-head test hooks: skip the menus and host or join directly.
-    bool testHost(int stage, uint16_t port);
+    bool testHost(int stage, uint16_t port, int autoStart = 2);
     void testDiscoveryPort(uint16_t p) { versus_.discoveryPort = p; }
     void testProfile(const std::string& name) {
         profile_.name = name;
@@ -65,12 +66,16 @@ public:
     }
     uint16_t testHostPort() const { return versus_.gamePort; }  // may differ if the first port was busy
     bool testJoin(const std::string& ip, uint16_t port, int car);
-    struct VersusReport {
-        bool finished, peerSeen, peerFinished;
-        std::string peerName, peerId;
-        int rank;
-        float time, peerTime;
+    struct VersusReport {  // what this console sees of the race
+        bool finished = false, racing = false;
+        int rank = 0, mySlot = 0;
+        float time = 0;
+        bool active[MAX_PLAYERS] = {}, seen[MAX_PLAYERS] = {}, finishedSlot[MAX_PLAYERS] = {};
+        float times[MAX_PLAYERS] = {};
+        std::string names[MAX_PLAYERS], ids[MAX_PLAYERS];
     };
+    void testBotSkill(float s) { botSkill_ = s; }  // autopilot pace, for varied demo races
+    std::string debugLine() const;  // where our car is and what it's doing (test diagnostics)
     VersusReport versusReport() const;
     // What the autopilot would do right now (used by the demo recorder).
     Input botInput() { return autopilot(); }
@@ -160,6 +165,10 @@ private:
     int toastT_ = 0, padEvents_ = 0;
     int ledColor_ = -1;
     bool opponentLeft_ = false;
+    bool leftShown_[MAX_PLAYERS] = {};
+    int autoStart_ = 0;  // test hook: host starts when this many players are in
+    float botSkill_ = 1;
+    std::string addrEdit_;
     bool turbo_ = false;  // unlocked by typing the secret code on the title screen
     int boosts_ = 0, boostT_ = 0;
 

@@ -171,22 +171,46 @@ browser. In head-to-head both names and IDs are exchanged. Names show in the lob
 on the pairing screen, above the other player's car and on the results, and the IDs
 are there for a future internet leaderboard.
 
-### Head to head (LAN)
+### Head to head (up to 4 players, LAN or internet)
 
-Race a friend on the same network. Choose **HEAD TO HEAD**, pick a car, then one
-player chooses **HOST A GAME** (and a stage) and the other **JOIN A GAME**. Games
-host themselves automatically, so the joiner just picks one from the list. Each machine
-drives its own car and streams its position to the other 60 times a second. This
-is the same shape a future internet server will use. It needs the desktop build,
-because browsers can't open UDP sockets. It uses UDP ports 47016 (discovery) and 47017.
+Choose **HEAD TO HEAD** and pick a car. One player chooses **HOST A GAME** and a
+stage; the host's screen shows its address and port. Everyone else then either:
+
+- **FIND LAN GAMES**: pick the game from the list (same network), or
+- **JOIN BY ADDRESS**: type the host's IP and port, e.g. `203.0.113.7:47017`
+  (the port defaults to 47017, and the last address is remembered).
+
+Up to four players can join. The host presses START when everyone is in. No
+server is involved. The host is the hub, relaying each car's state to the others
+60 times a second (a 112-byte packet, about 7 KB/s per player). Remote cars are
+extrapolated between packets, and the HUD shows your ping.
+
+**Over the internet**, only the host needs a reachable port. Forward **UDP 47017**
+on the host's router to the host machine, then give the other players your public
+IP. Players need no router setup. It needs the desktop build, because browsers
+can't open UDP sockets. LAN discovery uses UDP 47016.
+
 On macOS, the first time you host or join, the system asks whether S3 may accept
-incoming network connections: choose **Allow**, or the other machine can't reach
-you. Set `S3_NET_DEBUG=1` to log the protocol if a LAN game won't connect.
+incoming network connections: choose **Allow**, or the others can't reach
+you. Set `S3_NET_DEBUG=1` to log the protocol if a game won't connect.
+
+### Four players on one screen
+
+```bash
+./s3 --quad 4                    # 2x2 split screen: 4 full consoles racing over real UDP
+./s3 --record-quad match.mp4 4   # film an autopilot 4-way match (needs ffmpeg)
+```
+
+`--quad` runs four complete consoles in one window, connected through the real
+network code. The keyboard and pad 1 drive player 1, pads 2 to 4 drive the other
+players, and seats without a pad are driven by the autopilot. After each race it
+moves on to the next stage. Use it to test with four people on one computer, or
+to capture footage for a trailer.
 
 ### Version
 
 The title, menu, pause and controls screens show the version and build,
-for example `V1.5.0 (a1b2c3d)`. `./s3 --version` prints it too.
+for example `V1.6.0 (a1b2c3d)`. `./s3 --version` prints it too.
 
 **Rumour has it** the developers left something on the title screen for anyone who types the right
 four characters and presses Enter. Whatever it is, it comes with three shots of turbo per stage.
@@ -223,7 +247,7 @@ src/game/      rally (game, physics, AI, HUD) · stages · art · sound · radio
 ./s3 --record V.raw A.raw   # scripted player, raw video + audio for ffmpeg
 ./s3 --radio DIR            # render each radio station to a WAV
 ./s3 --music-test DIR       # check YOUR MUSIC loads, plays and advances with a folder
-./s3 --versus-test [STAGE] [--discover]   # two consoles race over loopback UDP
+./s3 --versus-test [STAGE] [--players N] [--discover]   # 2-4 consoles race over loopback UDP
 ```
 
 ## License

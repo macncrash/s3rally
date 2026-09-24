@@ -27,6 +27,8 @@ jobs:
       - run: ./s3 --sim
       - run: ./s3 --versus-test 0 --discover
       - run: ./s3 --versus-test 2
+      - run: ./s3 --versus-test 1 --players 4
+      - run: ./s3 --versus-test 3 --players 4 --discover
 
   web:
     runs-on: ubuntu-latest

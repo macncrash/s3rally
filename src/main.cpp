@@ -3,6 +3,9 @@
 //   s3                 play (window, sound, keyboard or gamepad)
 //   s3 --sim           headless: autopilot drives every stage, prints a report
 //   s3 --sim --shots D also saves screenshots into directory D
+//   s3 --quad [N]      N consoles (2-4) racing each other over the network, split screen
+//   s3 --record-quad F [N]  film an N-player autopilot match to F.mp4 (needs ffmpeg)
+//   s3 --versus-test [STAGE] [--players N] [--discover]  headless multiplayer test
 
 #include <algorithm>
 #include <chrono>
@@ -18,6 +21,7 @@
 #include "console/system.h"
 #include "game/radio.h"
 #include "game/rally.h"
+#include "multi.h"
 #include "version.h"
 
 static int simulate(const char* shotDir) {
@@ -186,48 +190,6 @@ static void radioCheck(const char* wavDir, int seconds) {
     }
 }
 
-// Head-to-head over the loopback network: two complete consoles in one
-// process, one hosting and one joining, both driven by the autopilot.
-static int versusTest(int stage, bool discover) {
-    auto sa = std::make_unique<gs::System>(true), sb = std::make_unique<gs::System>(true);
-    auto ca = std::make_unique<rally::Rally>(), cb = std::make_unique<rally::Rally>();
-    sa->bootCart(*ca);
-    sb->bootCart(*cb);
-    ca->testProfile("RADRACER");  // same display name on purpose: the IDs tell them apart
-    cb->testProfile("RADRACER");
-    const uint16_t port = 47117;
-    // A private discovery port keeps the test independent of anything else listening on 47016.
-    ca->testDiscoveryPort(47216);
-    cb->testDiscoveryPort(47216);
-    if (!ca->testHost(stage, port) || !cb->testJoin(discover ? "discover" : "127.0.0.1", ca->testHostPort(), 1)) {
-        std::printf("versus: could not open sockets\n");
-        return 1;
-    }
-    int frames = 0;
-    for (; frames < 60 * 400; frames++) {
-        // In discovery mode the client presses Start in the lobby, as a player would.
-        sb->pad.keys[gs::BTN_START] = discover && frames < 600 && frames % 30 == 10;
-        sa->step();
-        sb->step();
-        std::this_thread::sleep_for(std::chrono::microseconds(300));  // let loopback packets land, like a real frame gap
-        auto a = ca->versusReport(), b = cb->versusReport();
-        if (a.finished && b.finished && a.peerFinished && b.peerFinished) break;
-    }
-    auto a = ca->versusReport(), b = cb->versusReport();
-    std::printf("versus on %s (%s) after %.1f s\n", rally::stageDef(stage).name, discover ? "found by LAN discovery" : "direct join", frames / 60.0);
-    std::printf("  host   finished %d  rank %d  time %.2f  saw opponent %d  opponent time %.2f\n", a.finished, a.rank, a.time, a.peerSeen, a.peerTime);
-    std::printf("  client finished %d  rank %d  time %.2f  saw opponent %d  opponent time %.2f\n", b.finished, b.rank, b.time, b.peerSeen, b.peerTime);
-    // Both must finish, see each other, agree on who won, and agree on each other's times.
-    std::printf("  names  host sees \"%s\" %s   client sees \"%s\" %s\n", a.peerName.c_str(), a.peerId.substr(0, 8).c_str(),
-                b.peerName.c_str(), b.peerId.substr(0, 8).c_str());
-    const bool namesOk = a.peerName == "RADRACER" && b.peerName == "RADRACER" && rally::validUuid(a.peerId) &&
-                         rally::validUuid(b.peerId) && a.peerId != b.peerId;
-    const bool ok = namesOk && a.finished && b.finished && a.peerSeen && b.peerSeen && a.rank != b.rank &&
-                    (a.rank == 1) == (a.time < b.time) && std::fabs(a.peerTime - b.time) < 0.1f && std::fabs(b.peerTime - a.time) < 0.1f;
-    std::printf("%s\n", ok ? "VERSUS OK" : "VERSUS FAILED");
-    return ok ? 0 : 1;
-}
-
 // YOUR MUSIC: point the radio at a folder, tune in, check tracks load, play
 // in stereo and advance.
 static int musicTest(const char* dir) {
@@ -272,8 +234,20 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--versus-test")) {
             const int st = i + 1 < argc && std::isdigit(static_cast<unsigned char>(argv[i + 1][0])) ? std::atoi(argv[i + 1]) : 0;
             bool disc = false;
-            for (int k = 1; k < argc; k++) disc |= !std::strcmp(argv[k], "--discover");
-            return versusTest(st, disc);
+            int players = 2;
+            for (int k = 1; k < argc; k++) {
+                disc |= !std::strcmp(argv[k], "--discover");
+                if (!std::strcmp(argv[k], "--players") && k + 1 < argc) players = std::atoi(argv[k + 1]);
+            }
+            return versusTest(st, players, disc);
+        }
+        else if (!std::strcmp(argv[i], "--quad")) {
+            const int players = i + 1 < argc && std::isdigit(static_cast<unsigned char>(argv[i + 1][0])) ? std::atoi(argv[i + 1]) : 4;
+            return runQuad(players, 0);
+        }
+        else if (!std::strcmp(argv[i], "--record-quad") && i + 1 < argc) {
+            const int players = i + 2 < argc && std::isdigit(static_cast<unsigned char>(argv[i + 2][0])) ? std::atoi(argv[i + 2]) : 4;
+            return recordQuad(players, 0, argv[i + 1]);
         }
         else if (!std::strcmp(argv[i], "--music-test") && i + 1 < argc) return musicTest(argv[i + 1]);
         else if (!std::strcmp(argv[i], "--music-dir")) {

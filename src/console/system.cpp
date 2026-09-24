@@ -32,7 +32,7 @@ void Pad::latch() {
     }
 }
 
-static int keyToButton(SDL_Keycode k) {
+int System::keyButton(int k) {
     switch (k) {
         case SDLK_UP: return BTN_UP;
         case SDLK_DOWN: return BTN_DOWN;
@@ -286,14 +286,17 @@ void System::pollEvents() {
                     else if (k == SDLK_RETURN && !alt) typed += '\n';
                     else if (k == SDLK_SPACE) typed += ' ';
                     else if (k == SDLK_BACKSPACE) typed += '\b';
+                    else if (k == SDLK_PERIOD || k == SDLK_KP_PERIOD) typed += '.';
+                    else if (k == SDLK_SEMICOLON && (e.key.keysym.mod & KMOD_SHIFT)) typed += ':';
+                    else if (k >= SDLK_KP_1 && k <= SDLK_KP_0) typed += k == SDLK_KP_0 ? '0' : char('1' + (k - SDLK_KP_1));
                     if (typed.size() > 16) typed.erase(0, typed.size() - 16);
                 }
-                int b = keyToButton(k);
+                int b = keyButton(k);
                 if (b >= 0 && !alt) pad.keys[b] = pad.tapped[b] = true;  // Alt+Enter is fullscreen, not START
                 break;
             }
             case SDL_KEYUP: {
-                int b = keyToButton(e.key.keysym.sym);
+                int b = keyButton(e.key.keysym.sym);
                 if (b >= 0) pad.keys[b] = false;  // always release, whatever the modifiers
                 break;
             }
@@ -313,6 +316,12 @@ void System::pollEvents() {
                 break;
         }
     }
+    readController(ctl_, ctl, pad, trigWas_);
+}
+
+// Read one game controller into a pad through its button map. Shared by the
+// normal board and the four-console quad mode.
+void System::readController(_SDL_GameController* ctl_, Controller& ctl, Pad& pad, bool trigWas_[2]) {
     std::fill(std::begin(pad.padBtn), std::end(pad.padBtn), false);
     pad.axisX = pad.accel = pad.brake = 0;
     ctl.anyDown = false;

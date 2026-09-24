@@ -518,7 +518,7 @@ Input Rally::autopilot() {
     in.steer = clampf((target - x_) * 2.5f + pct * here.curve * 0.34f, -1, 1);
     float safe = std::fabs(worst) > 0.5f ? std::min(1.05f, 0.98f / (std::fabs(worst) * 0.3f)) : 1.05f;
     if (here.surface == FORD) safe = 0.6f;
-    in.throttle = pct < safe ? 1.0f : 0.0f;
+    in.throttle = pct < safe && pct < botSkill_ ? 1.0f : 0.0f;
     in.brake = pct > safe + 0.1f ? 1.0f : 0.0f;
     return in;
 }
@@ -596,7 +596,8 @@ void Rally::drive(const Input& in, bool attract) {
                 else sys_->rumble(0.5f, 0.6f, 180);
                 for (int i = 0; i < 10; i++)
                     parts_.push_back({HALF + (std::rand() % 80 - 40), 200, (std::rand() % 100 - 50) / 25.0f, -(std::rand() % 100) / 40.0f, 10, 0.6f, 0, 30, 1});
-            } else if (!info.solid) {
+            } else if (!info.solid && speed_ > MAX * 0.2f) {
+                // Bushes, snowbanks and the like slow you, but never below a crawl: you can always drive out.
                 speed_ -= MAX * 0.5f * DT;
             }
         }
@@ -981,8 +982,8 @@ void Rally::drawWorld(int baseIndex, float basePct, float position) {
             const int frame = std::min(4, int(std::fabs(seg.curve) / 1.6f));
             const float bob = (r.speed > 0 && ((frameNo_ + int(r.top * 97)) % 6) < 3) ? std::max(1.0f, w / 60) : 0;
             spr(art_.car[frame], cx, sy - bob, w * CAR_ASPECT, PAL_RIVAL + r.pal, seg.curve < 0, fog, int(seg.clip));
-            if (r.remote && fog < 12 && !versus_.peerName.empty() && w > 12)  // name tag over the other player's car
-                text(versus_.peerName, cx, sy - w * CAR_ASPECT - 12, std::clamp(w / 90.0f, 0.5f, 0.9f), PAL_YELLOW);
+            if (r.remote && r.slot >= 0 && fog < 12 && w > 12 && !versus_.players[r.slot].name.empty())  // name tag
+                text(versus_.players[r.slot].name, cx, sy - w * CAR_ASPECT - 12, std::clamp(w / 90.0f, 0.5f, 0.9f), PAL_YELLOW);
             if (SURF[seg.surface].dusty && r.speed > MAX * 0.3f && fog < 14)
                 spr(art_.puff, cx + ((frameNo_ / 3) % 2 ? w * 0.3f : -w * 0.3f), sy - w * 0.05f, w * 0.55f, PAL_FX, false, fog + 2, int(seg.clip));
             shadows.push_back({cx, sy + w * 0.03f, w * 1.1f, int(seg.clip)});
@@ -1124,6 +1125,7 @@ void Rally::drawHud() {
         hud(36, 4, "/" + std::to_string(rivals_.size() + 1), PAL_HUD);
     }
     hud(2, 5, fmtTime(lapTime_), PAL_HUD);
+    if (type_ == GameType::Versus && versus_.pingMs() >= 0) hud(2, 6, "PING " + std::to_string(versus_.pingMs()) + "MS", PAL_HUD);
 
     // Pace note.
     if (noteShow_ > 0 && mode_ == Mode::Race) {
@@ -1232,13 +1234,25 @@ void Rally::drawMenus() {
         }
         case Mode::Result: {
             if (type_ == GameType::Versus) {
-                text(rank_ == 1 ? "YOU WIN!" : "YOU LOSE", HALF, 30, 2, rank_ == 1 ? PAL_YELLOW : PAL_RED);
-                const CarState& p = versus_.peer;
-                std::string me = profile_.name, them = versus_.peerName.empty() ? std::string("OPPONENT") : versus_.peerName;
-                me.resize(13, ' ');
-                them.resize(13, ' ');
-                hud(7, 11, me + fmtTime(raceTime_), PAL_YELLOW);
-                hud(7, 12, them + (opponentLeft_ && !p.finished ? std::string("LEFT") : p.finished ? fmtTime(p.time) : std::string("RACING...")), PAL_HUD);
+                text(rank_ == 1 ? "YOU WIN!" : ordinal(rank_) + " PLACE", HALF, 24, 2, rank_ == 1 ? PAL_YELLOW : PAL_HUD);
+                // Standings: finishers by time, then everyone still racing by distance.
+                struct Row { std::string name; bool fin; float time, dist; bool me, left; };
+                std::vector<Row> rows = {{profile_.name, true, raceTime_, dist_, true, false}};
+                for (const Rival& r : rivals_) {
+                    if (!r.remote || r.slot < 0) continue;
+                    const NetPlayer& p = versus_.players[r.slot];
+                    rows.push_back({p.name, p.state.finished, p.state.time, r.dist, false, !p.active});
+                }
+                std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
+                    if (a.fin != b.fin) return a.fin;
+                    return a.fin ? a.time < b.time : a.dist > b.dist;
+                });
+                for (size_t i = 0; i < rows.size(); i++) {
+                    std::string n = rows[i].name.empty() ? "PLAYER" : rows[i].name;
+                    n.resize(13, ' ');
+                    const std::string t = rows[i].fin ? fmtTime(rows[i].time) : rows[i].left ? "LEFT" : "RACING...";
+                    hud(5, 10 + int(i) * 2, ordinal(int(i) + 1) + "  " + n + t, rows[i].me ? PAL_YELLOW : PAL_HUD);
+                }
             } else {
                 text(withRivals_ ? (rank_ == 1 ? "YOU WIN!" : "STAGE CLEAR") : "FINISH", HALF, 30, 2, PAL_YELLOW);
                 if (withRivals_) text("POSITION " + ordinal(rank_), HALF, 70, 1.5f, PAL_HUD);
@@ -1310,29 +1324,40 @@ void Rally::drawSecret() {
 
 // ================================================================ head to head
 
-// Lobby steps: 0 choose host/join, 1 host picks a stage, 2 host waits,
-// 3 join browses games, 4 joining, 5 connected and about to start.
+// Lobby steps: 0 host / find / join-by-address, 1 host picks a stage, 2 host
+// waits for players, 3 LAN list, 4 connecting, 5 joined and waiting for the
+// host, 6 typing an address.
 void Rally::updateLobby(bool confirm, bool back) {
-    versus_.myName = profile_.name;  // who we are to the other player
-    versus_.myId = profile_.id;
     const gs::Pad& pad = sys_->pad;
-    auto fail = [&](const char* why) {
+    versus_.myName = profile_.name;  // who we are to the other players
+    versus_.myId = profile_.id;
+    auto fail = [&](const std::string& why) {
         versus_.stop();
         toast_ = why;
-        toastT_ = 200;
+        toastT_ = 220;
         lobbyStep_ = 0;
         t_ = 0;
     };
     switch (lobbyStep_) {
         case 0:
-            if (pad.pressed(gs::BTN_UP) || pad.pressed(gs::BTN_DOWN)) { lobbySel_ ^= 1; sfx_->menuMove(); }
+            if (pad.pressed(gs::BTN_UP)) { lobbySel_ = (lobbySel_ + 2) % 3; sfx_->menuMove(); }
+            if (pad.pressed(gs::BTN_DOWN)) { lobbySel_ = (lobbySel_ + 1) % 3; sfx_->menuMove(); }
             if (back) { mode_ = Mode::Menu; t_ = 0; }
             else if (confirm && t_ > 5) {
                 sfx_->menuSelect();
                 t_ = 0;
-                if (lobbySel_ == 0) lobbyStep_ = 1;
-                else if (versus_.search()) { lobbyStep_ = 3; lobbySel_ = 0; }
-                else fail("COULD NOT OPEN THE NETWORK");
+                if (lobbySel_ == 0) {
+                    lobbyStep_ = 1;
+                } else if (lobbySel_ == 1) {
+                    if (versus_.search()) { lobbyStep_ = 3; lobbySel_ = 0; }
+                    else fail("COULD NOT OPEN THE NETWORK");
+                } else {
+                    addrEdit_.clear();
+                    for (char c : sys_->loadBlob("last-address.txt"))
+                        if (std::isdigit(static_cast<unsigned char>(c)) || c == '.' || c == ':') addrEdit_ += c;
+                    sys_->typed.clear();
+                    lobbyStep_ = 6;
+                }
             }
             break;
         case 1:
@@ -1350,10 +1375,16 @@ void Rally::updateLobby(bool confirm, bool back) {
                 else fail("COULD NOT OPEN THE NETWORK");
             }
             break;
-        case 2:
-            if (back) { versus_.stop(); lobbyStep_ = 1; t_ = 0; }
-            else if (versus_.connected()) { sfx_->checkpoint(); lobbyStep_ = 5; t_ = 0; }
+        case 2: {
+            if (back) { versus_.stop(); lobbyStep_ = 1; t_ = 0; break; }
+            const int n = versus_.playerCount();
+            const bool autoGo = autoStart_ > 0 && n >= autoStart_ && t_ > 60;
+            if (n >= 2 && ((confirm && t_ > 5) || autoGo)) {
+                versus_.sendGo();
+                startVersusRace();
+            }
             break;
+        }
         case 3: {
             const int n = int(versus_.hosts.size());
             if (n) {
@@ -1373,44 +1404,86 @@ void Rally::updateLobby(bool confirm, bool back) {
         case 4:
             if (back) { versus_.stop(); lobbyStep_ = 0; t_ = 0; }
             else if (versus_.connected()) { sfx_->checkpoint(); lobbyStep_ = 5; t_ = 0; }
-            else if (versus_.phase == Versus::Phase::Lost) fail("NO ANSWER FROM THAT GAME");
+            else if (versus_.phase == Versus::Phase::Lost) fail(versus_.lostReason);
             break;
         case 5:
-            if (versus_.phase == Versus::Phase::Lost) fail("OPPONENT LEFT");
-            else if (versus_.isHost && t_ == 90) {  // give both players a moment to see who they're racing
-                versus_.sendGo();
-                startVersusRace();
-            } else if (!versus_.isHost && versus_.takeGo()) {
-                startVersusRace();
-            }
+            if (back) { versus_.stop(); lobbyStep_ = 0; t_ = 0; }
+            else if (versus_.phase == Versus::Phase::Lost) fail(versus_.lostReason);
+            else if (versus_.takeGo()) startVersusRace();
             break;
+        case 6: {
+            // Keyboard: type it. Pad: up/down picks a character, right adds, left deletes.
+            static const std::string charset = "0123456789.:";
+            for (char c : sys_->typed) {
+                if (c == '\b') {
+                    if (!addrEdit_.empty()) addrEdit_.pop_back();
+                } else if ((std::isdigit(static_cast<unsigned char>(c)) || c == '.' || c == ':') && addrEdit_.size() < 21) {
+                    addrEdit_ += c;
+                }
+            }
+            sys_->typed.clear();
+            size_t at = charset.find(pendingChar_);
+            if (at == std::string::npos) at = 0;
+            if (pad.pressed(gs::BTN_UP)) pendingChar_ = charset[(at + charset.size() - 1) % charset.size()];
+            if (pad.pressed(gs::BTN_DOWN)) pendingChar_ = charset[(at + 1) % charset.size()];
+            if (pad.pressed(gs::BTN_RIGHT) && addrEdit_.size() < 21) addrEdit_ += pendingChar_;
+            if (pad.pressed(gs::BTN_LEFT) && !addrEdit_.empty()) addrEdit_.pop_back();
+            if (back) { lobbyStep_ = 0; t_ = 0; break; }
+            if (!sys_->pad.pressed(gs::BTN_START) || t_ < 6) break;
+            gs::NetAddr a;
+            const size_t colon = addrEdit_.find(':');
+            const std::string ip = addrEdit_.substr(0, colon);
+            const long port = colon == std::string::npos ? GAME_PORT : std::strtol(addrEdit_.c_str() + colon + 1, nullptr, 10);
+            if (port < 1 || port > 65535 || !gs::NetAddr::parse(ip, uint16_t(port), &a)) {
+                toast_ = "TRY AN ADDRESS LIKE 203.0.113.5:47017";
+                toastT_ = 200;
+                break;
+            }
+            sys_->saveBlob("last-address.txt", addrEdit_);
+            sfx_->menuSelect();
+            versus_.join(a, carId_);
+            lobbyStep_ = 4;
+            t_ = 0;
+            break;
+        }
     }
 }
 
+// Grid: two abreast, slots 0-1 on the front row, 2-3 behind.
+static float gridX(int slot) { return slot % 2 ? 0.45f : -0.45f; }
+
 void Rally::startVersusRace() {
     type_ = GameType::Versus;
-    startStage(versus_.stage, false);  // no AI field: just the two of you
+    startStage(versus_.stage, false);  // no AI field: just the players
     withRivals_ = true;
-    x_ = versus_.isHost ? -0.4f : 0.4f;
-    Rival r;
-    r.remote = true;
-    r.dist = dist_;
-    r.x = r.lane = -x_;
-    r.top = 1;
-    r.pal = NUM_RIVAL_PALS - 1;
-    r.name = "OPPONENT";
-    rivals_.push_back(r);
-    setCarPalette(*vdp_, PAL_RIVAL + r.pal, versus_.peer.car);  // their car, their livery
-    rank_ = versus_.isHost ? 1 : 2;
+    const float front = dist_;
+    const int me = versus_.mySlot;
+    x_ = gridX(me);
+    dist_ = front - (me / 2) * 2.0f * SEG;
+    int pal = 0;
+    for (int s = 0; s < MAX_PLAYERS; s++) {
+        if (s == me || !versus_.players[s].active) continue;
+        Rival r;
+        r.remote = true;
+        r.slot = s;
+        r.dist = front - (s / 2) * 2.0f * SEG;
+        r.x = r.lane = gridX(s);
+        r.top = 1;
+        r.pal = pal;
+        setCarPalette(*vdp_, PAL_RIVAL + pal, versus_.players[s].car);  // their car, their livery
+        rivals_.push_back(r);
+        pal = std::min(pal + 1, NUM_RIVAL_PALS - 1);
+    }
+    for (bool& b : leftShown_) b = false;
     opponentLeft_ = false;
     beginCountdown();
 }
 
-// Every frame: pump the network, send our car, place theirs.
+// Every frame: pump the network, send our car, place everyone else's.
 void Rally::updateVersus() {
     if (versus_.phase == Versus::Phase::Idle) return;
     versus_.tick();
-    if (versus_.connected()) {
+    if (versus_.phase == Versus::Phase::Ready) {
         CarState me;
         me.dist = dist_;
         me.x = x_;
@@ -1422,32 +1495,51 @@ void Rally::updateVersus() {
         me.finished = mode_ == Mode::Finish || mode_ == Mode::Result;
         versus_.sendState(me);
     }
-    if (type_ != GameType::Versus || rivals_.empty() || !rivals_[0].remote) return;
-    Rival& r = rivals_[0];
-    const CarState& p = versus_.peer;
-    if (versus_.peerSeen && versus_.phase == Versus::Phase::Ready) {
-        // Extrapolate from the last update so the car keeps moving between packets.
-        const int age = std::min(versus_.framesSincePeer, 30);
-        r.dist = p.dist + p.speed * DT * age;
-        r.x = p.x;
-        r.speed = p.speed;
+    if (type_ != GameType::Versus) return;
+    for (Rival& r : rivals_) {
+        if (!r.remote || r.slot < 0) continue;
+        const NetPlayer& p = versus_.players[r.slot];
+        if (p.seen) {
+            // Extrapolate from the last update so the car keeps moving between packets.
+            const int age = std::min(p.framesSince, 30);
+            r.dist = p.state.dist + p.state.speed * DT * age;
+            r.x = p.state.x;
+            r.speed = p.state.speed;
+        }
+        if (!p.active && versus_.started && !leftShown_[r.slot] && mode_ == Mode::Race) {
+            leftShown_[r.slot] = true;
+            say({p.name.empty() ? std::string("A PLAYER LEFT") : p.name + " LEFT"}, 150, PAL_RED);
+        }
     }
     if (versus_.phase == Versus::Phase::Lost && !opponentLeft_) {
         opponentLeft_ = true;
-        say({"OPPONENT LEFT"}, 150, PAL_RED);
+        say({versus_.lostReason}, 180, PAL_RED);
     }
 }
 
 void Rally::drawLobby() {
-    text("HEAD TO HEAD", HALF, 16, 1.5f, PAL_YELLOW);
-    const std::string ip = gs::Link::localAddress();
+    text("HEAD TO HEAD", HALF, 12, 1.5f, PAL_YELLOW);
+    auto roster = [&](int row) {
+        for (int s = 0, line = 0; s < MAX_PLAYERS; s++) {
+            const NetPlayer& p = versus_.players[s];
+            if (!p.active) continue;
+            std::string n = p.name.empty() ? "PLAYER" : p.name;
+            n.resize(13, ' ');
+            std::string extra = s == 0 ? "HOST" : "";
+            if (versus_.isHost && s > 0 && p.pingMs >= 0) extra = "PING " + std::to_string(p.pingMs) + "MS";
+            hud(6, row + line * 2, (s == versus_.mySlot ? "> " : "  ") + n + extra, s == versus_.mySlot ? PAL_YELLOW : PAL_HUD);
+            line++;
+        }
+    };
     switch (lobbyStep_) {
-        case 0:
-            text("HOST A GAME", HALF, 84, 1.3f, lobbySel_ == 0 ? PAL_YELLOW : PAL_HUD);
-            text("JOIN A GAME", HALF, 110, 1.3f, lobbySel_ == 1 ? PAL_YELLOW : PAL_HUD);
-            text(">", 64, 84 + lobbySel_ * 26.0f, 1.3f, PAL_YELLOW, -1);
-            hud(7, 22, "BOTH PLAYERS ON THE SAME NETWORK", PAL_HUD);
+        case 0: {
+            const char* opts[] = {"HOST A GAME", "FIND GAMES ON LAN", "JOIN BY ADDRESS"};
+            for (int i = 0; i < 3; i++) text(opts[i], HALF, 70 + i * 24.0f, 1.2f, lobbySel_ == i ? PAL_YELLOW : PAL_HUD);
+            text(">", 34, 70 + lobbySel_ * 24.0f, 1.2f, PAL_YELLOW, -1);
+            hud(3, 20, "UP TO 4 PLAYERS, ON YOUR NETWORK", PAL_HUD);
+            hud(3, 21, "OR OVER THE INTERNET BY ADDRESS", PAL_HUD);
             break;
+        }
         case 1: {
             const StageDef& def = stageDef(stage_);
             hud(14, 7, "CHOOSE STAGE", PAL_HUD);
@@ -1455,38 +1547,58 @@ void Rally::drawLobby() {
             hud(20 - int(std::strlen(def.subtitle)) / 2, 15, def.subtitle, PAL_YELLOW);
             break;
         }
-        case 2:
-            hud(10, 8, "WAITING FOR A RIVAL", frameNo_ % 60 < 40 ? PAL_YELLOW : PAL_HUD);
-            hud(20 - int(profile_.name.size() + 5) / 2, 5, "HOST " + profile_.name, PAL_HUD);
-            hud(20 - int(std::strlen(stageDef(stage_).name)) / 2, 11, stageDef(stage_).name, PAL_HUD);
-            if (!ip.empty()) hud(20 - int(ip.size() + 9) / 2, 14, "YOUR IP  " + ip, PAL_HUD);
-            hud(8, 22, "ON THE OTHER MACHINE CHOOSE", PAL_HUD);
-            hud(8, 23, "HEAD TO HEAD - JOIN A GAME", PAL_YELLOW);
+        case 2: {
+            const std::string ip = gs::Link::localAddress();
+            hud(20 - int(std::strlen(stageDef(stage_).name)) / 2, 5, stageDef(stage_).name, PAL_YELLOW);
+            if (!ip.empty()) {
+                const std::string line = "ADDRESS " + ip + ":" + std::to_string(versus_.gamePort);
+                hud(20 - int(line.size()) / 2, 7, line, PAL_HUD);
+            }
+            roster(9);
+            const int n = versus_.playerCount();
+            if (n >= 2) hud(11, 18, "PRESS START TO RACE", frameNo_ % 60 < 40 ? PAL_YELLOW : PAL_HUD);
+            else hud(10, 18, "WAITING FOR PLAYERS", frameNo_ % 60 < 40 ? PAL_YELLOW : PAL_HUD);
+            hud(1, 20, "INTERNET: FORWARD UDP PORT " + std::to_string(versus_.gamePort) + " ON YOUR", PAL_HUD);
+            hud(1, 21, "ROUTER TO THIS MACHINE, AND SHARE YOUR", PAL_HUD);
+            hud(1, 22, "PUBLIC IP ADDRESS WITH THE OTHERS.", PAL_HUD);
             break;
+        }
         case 3: {
             hud(11, 6, "GAMES ON YOUR NETWORK", PAL_HUD);
             if (versus_.hosts.empty()) hud(12, 12, "SEARCHING...", frameNo_ % 60 < 40 ? PAL_YELLOW : PAL_HUD);
-            for (size_t i = 0; i < versus_.hosts.size() && i < 8; i++) {
+            for (size_t i = 0; i < versus_.hosts.size() && i < 7; i++) {
                 const HostInfo& h = versus_.hosts[i];
                 std::string who = h.name.empty() ? h.addr.str() : h.name;
                 who.resize(13, ' ');
-                std::string line = who + stageDef(h.stage).name;
-                if (h.version != S3_VERSION) line += "  V" + h.version;
-                hud(6, 9 + int(i) * 2, (int(i) == lobbySel_ ? "> " : "  ") + line, int(i) == lobbySel_ ? PAL_YELLOW : PAL_HUD);
+                std::string line = who + stageDef(h.stage).name + "  " + std::to_string(h.players) + "/4";
+                if (h.version != S3_VERSION) line += " V" + h.version;
+                hud(3, 9 + int(i) * 2, (int(i) == lobbySel_ ? "> " : "  ") + line, int(i) == lobbySel_ ? PAL_YELLOW : PAL_HUD);
             }
             break;
         }
         case 4:
             hud(13, 12, "CONNECTING...", frameNo_ % 60 < 40 ? PAL_YELLOW : PAL_HUD);
             break;
-        case 5:
-            text("RIVAL FOUND!", HALF, 54, 1.5f, PAL_YELLOW);
-            text(profile_.name + " VS " + (versus_.peerName.empty() ? "?" : versus_.peerName), HALF, 84, 1.0f, PAL_HUD);
-            hud(20 - int(std::strlen(stageDef(versus_.stage).name)) / 2, 14, stageDef(versus_.stage).name, PAL_HUD);
-            hud(20 - int(std::strlen(carSpec(versus_.peer.car).name)) / 2, 16, carSpec(versus_.peer.car).name, PAL_HUD);
+        case 5: {
+            hud(20 - int(std::strlen(stageDef(versus_.stage).name)) / 2, 5, stageDef(versus_.stage).name, PAL_YELLOW);
+            roster(8);
+            hud(7, 18, "WAITING FOR THE HOST TO START", frameNo_ % 60 < 40 ? PAL_YELLOW : PAL_HUD);
+            if (versus_.pingMs() >= 0) hud(15, 20, "PING " + std::to_string(versus_.pingMs()) + "MS", PAL_HUD);
             break;
+        }
+        case 6: {
+            hud(12, 6, "JOIN BY ADDRESS", PAL_HUD);
+            std::string shown = addrEdit_;
+            if (frameNo_ % 40 < 26) shown += sys_->ctl.connected ? pendingChar_ : '_';
+            text(shown.empty() ? " " : shown, HALF, 80, 1.6f, PAL_YELLOW);
+            hud(6, 16, "THE HOST\x27S IP ADDRESS, OR IP:PORT", PAL_HUD);
+            hud(8, 17, "(THE PORT IS 47017 IF LEFT OFF)", PAL_HUD);
+            if (sys_->ctl.connected) hud(4, 20, "PAD: UP/DOWN DIGIT  RIGHT ADD  LEFT DEL", PAL_HUD);
+            hud(7, 22, "TYPE IT, THEN PRESS ENTER", PAL_HUD);
+            break;
+        }
     }
-    if (lobbyStep_ != 5) hud(8, 26, "ENTER SELECT   ESC BACK", PAL_HUD);
+    if (lobbyStep_ != 5 && lobbyStep_ != 2) hud(8, 26, "ENTER SELECT   ESC BACK", PAL_HUD);
 }
 
 // ================================================================ profile
@@ -1757,12 +1869,13 @@ void Rally::padFeedback() {
     }
 }
 
-bool Rally::testHost(int stage, uint16_t port) {
+bool Rally::testHost(int stage, uint16_t port, int autoStart) {
     carId_ = 0;
     versus_.myName = profile_.name;
     versus_.myId = profile_.id;
     if (!versus_.host(stage, carId_, port)) return false;
     type_ = GameType::Versus;
+    autoStart_ = autoStart;
     mode_ = Mode::Lobby;
     lobbyStep_ = 2;
     t_ = 0;
@@ -1772,29 +1885,39 @@ bool Rally::testHost(int stage, uint16_t port) {
 bool Rally::testJoin(const std::string& ip, uint16_t port, int car) {
     versus_.myName = profile_.name;
     versus_.myId = profile_.id;
+    carId_ = car;
+    type_ = GameType::Versus;
+    mode_ = Mode::Lobby;
+    t_ = 0;
     if (ip == "discover") {  // find the host through its LAN broadcast, like the lobby does
-        carId_ = car;
-        type_ = GameType::Versus;
-        mode_ = Mode::Lobby;
         lobbyStep_ = 3;
         lobbySel_ = 0;
-        t_ = 0;
         return versus_.search();
     }
     gs::NetAddr a;
     if (!gs::NetAddr::parse(ip, port, &a)) return false;
-    carId_ = car;
-    type_ = GameType::Versus;
     versus_.join(a, carId_);
-    mode_ = Mode::Lobby;
     lobbyStep_ = 4;
-    t_ = 0;
     return versus_.phase == Versus::Phase::Joining;
 }
 
 Rally::VersusReport Rally::versusReport() const {
-    return {mode_ == Mode::Finish || mode_ == Mode::Result, versus_.peerSeen, versus_.peer.finished, versus_.peerName, versus_.peerId,
-            rank_, raceTime_, versus_.peer.time};
+    VersusReport r;
+    r.finished = mode_ == Mode::Finish || mode_ == Mode::Result;
+    r.rank = rank_;
+    r.time = raceTime_;
+    r.mySlot = versus_.mySlot;
+    r.racing = mode_ == Mode::Countdown || mode_ == Mode::Race || r.finished;
+    for (int s = 0; s < MAX_PLAYERS; s++) {
+        const NetPlayer& p = versus_.players[s];
+        r.active[s] = p.active;
+        r.seen[s] = p.seen;
+        r.names[s] = p.name;
+        r.ids[s] = p.id;
+        r.finishedSlot[s] = p.state.finished;
+        r.times[s] = p.state.time;
+    }
+    return r;
 }
 
 // ================================================================ headless
@@ -1824,6 +1947,29 @@ Rally::SimReport Rally::simulateStage(int stage, std::vector<std::string>* shots
     rep.minTimer = minTimer_;
     rep.timeLeft = timer_;
     return rep;
+}
+
+}  // namespace rally
+
+namespace rally {
+
+std::string Rally::debugLine() const {
+    const Segment& s = segAt(dist_);
+    char buf[200];
+    std::snprintf(buf, sizeof buf, "mode %d seg %d/%d x %.2f speed %.0f%% lap %d curve %.1f surface %d objs %zu rivals %zu",
+                  int(mode_), s.i, track_.N, x_, speed_ / MAX * 100, lap_, s.curve, int(s.surface), s.objs.size(), rivals_.size());
+    std::string out = buf;
+    for (const Rival& r : rivals_) {
+        float dz = mod(r.dist - dist_, track_.length);
+        if (dz > track_.length / 2) dz -= track_.length;
+        std::snprintf(buf, sizeof buf, " | slot %d dz %.0f x %.2f speed %.0f%%", r.slot, dz, r.x, r.speed / MAX * 100);
+        out += buf;
+    }
+    for (const Obj& o : s.objs) {
+        std::snprintf(buf, sizeof buf, " | obj %d at %.2f", int(o.type), o.off);
+        out += buf;
+    }
+    return out;
 }
 
 }  // namespace rally
