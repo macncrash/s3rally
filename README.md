@@ -9,9 +9,9 @@
 ![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-![Gameplay](docs/gameplay.gif)
+![Gameplay](https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/gameplay.gif)
 
-▶ **[Watch the full run with sound](docs/gameplay.mp4)**: boot, menus, car select, and a Desert stage from 16th on the grid.
+▶ **[Watch the full run with sound](https://macncrash.github.io/s3garally-site/)**: boot, menus, car select, and a Desert stage from 16th on the grid.
 
 </div>
 
@@ -57,9 +57,9 @@ generated at boot. There are no asset files.
   counter. The clock-out comes with a *"Game over. Yeah!"*
 
 <p align="center">
-  <img src="docs/shots/title.png" width="32%"> <img src="docs/shots/menu.png" width="32%"> <img src="docs/shots/cars.png" width="32%"><br>
-  <img src="docs/shots/village.png" width="32%"> <img src="docs/shots/forest.png" width="32%"> <img src="docs/shots/mountain.png" width="32%"><br>
-  <img src="docs/shots/desert.png" width="32%"> <img src="docs/shots/lakeside.png" width="32%"> <img src="docs/shots/radio.png" width="32%">
+  <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/shots/title.png" width="32%"> <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/shots/menu.png" width="32%"> <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/shots/cars.png" width="32%"><br>
+  <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/shots/village.png" width="32%"> <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/shots/forest.png" width="32%"> <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/shots/mountain.png" width="32%"><br>
+  <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/shots/desert.png" width="32%"> <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/shots/lakeside.png" width="32%"> <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/shots/radio.png" width="32%">
 </p>
 
 ## Build and play
