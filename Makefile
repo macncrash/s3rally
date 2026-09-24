@@ -22,8 +22,14 @@ run: s3
 sim: s3
 	./s3 --sim
 
-clean:
-	rm -rf build s3
+# WebAssembly build for browsers (needs Emscripten: em++ on PATH).
+web:
+	@mkdir -p build-web
+	em++ -std=c++17 -O2 -Isrc -sUSE_SDL=2 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=134217728 \
+		-sENVIRONMENT=web --shell-file web/shell.html $(SRC) -o build-web/index.html
 
-.PHONY: run sim clean
+clean:
+	rm -rf build build-web s3
+
+.PHONY: run sim web clean
 -include $(OBJ:.o=.d)

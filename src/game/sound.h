@@ -21,6 +21,7 @@ public:
     void loadAsync(const std::string& dir);
     void say(int id, bool interrupt = false);
     void tick();
+    bool speaking();  // true while a line is being spoken (the radio ducks)
     int ready() const { return readyCount_; }
 
 private:

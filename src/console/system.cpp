@@ -9,6 +9,10 @@
 
 #include "gfx.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 namespace gs {
 
 bool Pad::anyPressed() const {
@@ -215,27 +219,16 @@ int System::run(Cart& cart) {
     biosInit();
     inBios_ = true;
 
-    const double freq = double(SDL_GetPerformanceFrequency());
-    uint64_t last = SDL_GetPerformanceCounter();
-    double acc = 0;
-    const double tick = 1.0 / 60.0;
-    while (!quit_) {
-        pollEvents();
-        uint64_t now = SDL_GetPerformanceCounter();
-        acc += std::min(0.25, double(now - last) / freq);
-        last = now;
-        int steps = 0;
-        while (acc >= tick && steps < 5) {
-            step();
-            acc -= tick;
-            steps++;
-        }
-        if (steps == 5) acc = 0;  // can't keep up: drop the backlog rather than spiral
-        if (steps) render();
-        present();
+    last_ = SDL_GetPerformanceCounter();
+#ifdef __EMSCRIPTEN__
+    // In a browser the page owns the loop: run one tick per animation frame, forever.
+    emscripten_set_main_loop_arg([](void* s) { static_cast<System*>(s)->tick(); }, this, 0, 1);
+#else
+    while (tick()) {
         // Without vsync (software renderer, minimised window) don't spin the CPU.
         if (!vsync_ || (SDL_GetWindowFlags(win_) & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN))) SDL_Delay(1);
     }
+#endif
     // Stop the audio thread before the cart (and the samples it owns) can be destroyed.
     if (audioDev_) {
         SDL_CloseAudioDevice(audioDev_);
@@ -243,6 +236,25 @@ int System::run(Cart& cart) {
     }
     apu.silence();
     return 0;
+}
+
+// One pass of the fixed-timestep loop: input, as many 60 Hz steps as are due, video out.
+bool System::tick() {
+    pollEvents();
+    const uint64_t now = SDL_GetPerformanceCounter();
+    acc_ += std::min(0.25, double(now - last_) / double(SDL_GetPerformanceFrequency()));
+    last_ = now;
+    const double dt = 1.0 / 60.0;
+    int steps = 0;
+    while (acc_ >= dt && steps < 5) {
+        step();
+        acc_ -= dt;
+        steps++;
+    }
+    if (steps == 5) acc_ = 0;  // can't keep up: drop the backlog rather than spiral
+    if (steps) render();
+    present();
+    return !quit_;
 }
 
 void System::pollEvents() {

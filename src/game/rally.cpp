@@ -12,6 +12,11 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <sstream>
+
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 namespace rally {
 
@@ -91,7 +96,12 @@ void Rally::setStage(int s) {
 }
 
 void Rally::loadRecords() {
+#ifdef __EMSCRIPTEN__
+    // In a browser, records live in the page's localStorage.
+    std::istringstream f(emscripten_run_script_string("localStorage.getItem('gensys-records') || ''"));
+#else
     std::ifstream f(sys_->dataPath("records.txt"));
+#endif
     int s;
     float lap, race;
     while (f >> s >> lap >> race)
@@ -103,8 +113,13 @@ void Rally::loadRecords() {
 
 void Rally::saveRecords() {
     if (sys_->headless) return;
-    std::ofstream f(sys_->dataPath("records.txt"));
+    std::ostringstream f;
     for (int s = 0; s < NUM_STAGES; s++) f << s << ' ' << recLap_[s] << ' ' << recRace_[s] << '\n';
+#ifdef __EMSCRIPTEN__
+    EM_ASM({ try { localStorage.setItem('gensys-records', UTF8ToString($0)); } catch (e) {} }, f.str().c_str());
+#else
+    std::ofstream(sys_->dataPath("records.txt")) << f.str();
+#endif
 }
 
 void Rally::toTitle() {
@@ -367,7 +382,7 @@ void Rally::frame(gs::System& sys) {
         updateParticles();
     }
     updateSound();
-    radio_->duck(sys.apu.playing(0));  // turn the radio down while the co-driver talks
+    radio_->duck(voice_->speaking());  // turn the radio down while the co-driver talks
     radio_->tick();
     sfx_->tick();
     voice_->tick();

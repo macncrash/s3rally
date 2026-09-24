@@ -1,6 +1,9 @@
 #include "sound.h"
 
 #include <SDL.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 #include <sys/stat.h>
 
 #include <algorithm>
@@ -45,6 +48,9 @@ std::string shellQuote(const std::string& s) {
 }  // namespace
 
 void CoDriver::loadAsync(const std::string& dir) {
+#ifdef __EMSCRIPTEN__
+    (void)dir;  // the browser speaks the lines live
+#else
     if (worker_.joinable()) return;  // already loading or loaded
     worker_ = std::thread([this, dir]() {
         std::error_code ec;
@@ -75,7 +81,31 @@ void CoDriver::loadAsync(const std::string& dir) {
             SDL_FreeWAV(buf);
         }
     });
+#endif
 }
+
+#ifdef __EMSCRIPTEN__
+// In a browser there is no `say` command: use the Web Speech API instead.
+void CoDriver::say(int id, bool interrupt) {
+    if (id < 0 || id >= V_COUNT) return;
+    const bool announcer = id >= V_CHECKPOINT;
+    EM_ASM(
+        {
+            if (!window.speechSynthesis) return;
+            if ($2) speechSynthesis.cancel();
+            const u = new SpeechSynthesisUtterance(UTF8ToString($0));
+            u.pitch = $1 ? 0.55 : 1.0;
+            u.rate = $1 ? 0.95 : 1.15;
+            speechSynthesis.speak(u);
+        },
+        VOICE_TEXT[id], announcer, interrupt);
+}
+
+void CoDriver::tick() {}
+
+bool CoDriver::speaking() { return EM_ASM_INT({ return window.speechSynthesis && speechSynthesis.speaking ? 1 : 0; }) != 0; }
+#else
+bool CoDriver::speaking() { return apu_.playing(0); }
 
 void CoDriver::say(int id, bool interrupt) {
     if (id < 0 || id >= V_COUNT || !ok_[id]) return;
@@ -90,6 +120,7 @@ void CoDriver::say(int id, bool interrupt) {
 void CoDriver::tick() {
     if (pending_ >= 0 && !apu_.playing(0)) say(pending_);
 }
+#endif
 
 // ------------------------------------------------------------ effects
 

@@ -69,6 +69,7 @@ public:
     bool crt = true;
 
 private:
+    bool tick();  // one frame of the main loop; false once quit
     void pollEvents();
     void present();
     void biosInit();
@@ -84,6 +85,8 @@ private:
     _SDL_GameController* ctl_ = nullptr;
     uint32_t audioDev_ = 0;
     bool vsync_ = false;
+    uint64_t last_ = 0;
+    double acc_ = 0;
 };
 
 }  // namespace gs
