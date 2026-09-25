@@ -83,6 +83,7 @@ public:
     float romUsedMB() const;
     int tilesUsed() const { return tilesUsed_; }
     void testProfile(const std::string& name);
+    void testOpenProfile() { startProfile(true); }
     void testBotSkill(float s) { botSkill_ = s; }
     bool testHost(int stage, uint16_t port, int autoStart = 2);
     bool testJoin(const std::string& ip, uint16_t port, int car);

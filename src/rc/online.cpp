@@ -186,6 +186,7 @@ void RallyChamp::updateOnline() {
             o.speed = p.state.speed;
             o.running = p.state.lap > 0 || p.state.finished;
             o.finished = p.state.finished;
+            if (!o.running) o.s = (course_.startSeg - 30) * SEG / U;  // still queued for the start: out of our way
             o.y = car_.ground(course_, o.s);
         }
         if (!p.active && versus_.started && !leftShown_[o.slot] && mode_ == Mode::Stage) {

@@ -351,7 +351,7 @@ void RallyChamp::drawWorld(float camS, float camX, float camY, float camPsi) {
                 const float yawRel = o.psi + course_.heading(i) - camHeading - std::atan2((sx - HALF) / F, 1.0f);
                 drawCar(sx, sy, ppm, yawRel, 0, 0, o.pal, fog, clip, false, 0);
                 shadows.push_back({sx, sy + 1, ppm * 2.3f, clip});
-                if (o.slot >= 0 && !o.name.empty() && fog < 12 && ppm > 12)
+                if (o.slot >= 0 && !o.name.empty() && fog < 12 && ppm > 12 && !menu)
                     text(o.name, sx, sy - ppm * 1.9f - 10, clampf(ppm / 60, 0.5f, 0.9f), PAL_YELLOW);
                 break;
             }
