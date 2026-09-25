@@ -129,6 +129,7 @@ private:
     const Placed* hitList_[4] = {};  // objects already hit (so each counts once)
     int hitSeg_[4] = {};
     int hitNext_ = 0;
+    float pullSide_ = 1;  // which way bent suspension pulls
     bool assist_ = true;  // this frame's driving help setting
 };
 

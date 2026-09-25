@@ -288,6 +288,7 @@ void Rally32::frame(gs::System& sys) {
             break;
         case Mode::Drive: {
             if (pad.pressed(gs::BTN_MODE)) { mode_ = Mode::Pick; attract_ = true; t_ = 0; break; }
+            if (pad.pressed(gs::BTN_A)) view_ = (view_ + 1) % 3;  // V or Z: chase, cockpit, far
             const rc::CarInput in = (sys.headless && !sys.scripted) ? autopilot() : readPad();
             car_.step(course_, in, DT, false);
             time_ += DT;
@@ -348,11 +349,25 @@ void Rally32::scene() {
     V3 carPos = roadPoint(car_.s, car_.x);
     carPos.y = car_.y;
     const V3 back{std::sin(camYaw_), 0, std::cos(camYaw_)};
-    cam_.pos = carPos - back * 6.4f;
-    cam_.pos.y = camY_;
-    cam_.yaw = camYaw_;
-    cam_.pitch = -0.15f;
-    cam_.focal = 250;
+    const bool cockpit = view_ == 1;
+    if (cockpit) {
+        // The driver's eyes: left seat, behind the wheel, moving with the car.
+        const float cyw = std::cos(carH), syw = std::sin(carH);
+        const V3 rightV{cyw, 0, -syw}, fwdV{syw, 0, cyw};
+        cam_.pos = carPos + rightV * -0.36f + fwdV * -0.15f + V3{0, 1.08f - car_.compress, 0};
+        cam_.yaw = carH;
+        cam_.pitch = car_.pitch - 0.03f;
+        cam_.roll = car_.roll * 0.6f;
+        cam_.focal = 190;
+    } else {
+        const float dist = view_ == 2 ? 9.5f : 6.4f;
+        cam_.pos = carPos - back * dist;
+        cam_.pos.y = camY_ + (view_ == 2 ? 1.4f : 0);
+        cam_.yaw = camYaw_;
+        cam_.pitch = view_ == 2 ? -0.2f : -0.15f;
+        cam_.roll = 0;
+        cam_.focal = 250;
+    }
     cam_.fogNear = V.fogNear * 0.6f;
     cam_.fogFar = std::min(V.fogFar, 320.0f);
     cam_.update();
@@ -468,6 +483,11 @@ void Rally32::scene() {
         const V3 light = g32::normalize({-0.35f, 0.85f, -0.4f});
         for (const rc::CarPoly& p : rc::carPolys()) {
             const int n = int(p.xyz.size() / 3);
+            if (view_ == 1) {  // from the driver's seat you see the bonnet, nothing behind the windscreen
+                bool front = true;
+                for (int k = 0; k < n; k++) front &= p.xyz[size_t(k) * 3 + 2] > 1.05f && p.xyz[size_t(k) * 3 + 1] < 0.9f;
+                if (!front) continue;
+            }
             WVtx q[10];
             for (int k = 0; k < n && k < 10; k++) q[k].p = xf(p.xyz[size_t(k) * 3], p.xyz[size_t(k) * 3 + 1], p.xyz[size_t(k) * 3 + 2]);
             V3 nrm = g32::normalize(g32::cross(q[1].p - q[0].p, q[2].p - q[0].p));
@@ -482,6 +502,7 @@ void Rally32::scene() {
                 g32::polygon(gpu_, cam_, t, 3, -1, g32::OPAQUE, -0.2f);
             }
         }
+        if (view_ == 1) return;
         // A shadow under it.
         WVtx sh[4];
         const V3 gp = roadPoint(car_.s, car_.x) + V3{0, 0.03f, 0};
@@ -537,6 +558,7 @@ void Rally32::hud() {
         if (best_ > 0) text("BEST " + fmtTime(best_), 160, 196, 1, yellow);
         return;
     }
+    if (view_ == 1) cockpitHud();
     text(fmtTime(time_ + car_.penalty), 8, 8, 1.6f, white, -1);
     char buf[32];
     std::snprintf(buf, sizeof buf, "%.1f KM", std::max(0.0f, course_.finishSeg * SEG_M - car_.s) / 1000);
@@ -567,6 +589,67 @@ float Rally32::simulate(int stage, int frames, std::vector<std::string>* shots, 
         }
     }
     return mode_ == Mode::Done ? time_ : 0;
+}
+
+}  // namespace rc32
+
+namespace rc32 {
+
+// The inside of the car, drawn over the 3D view: pillars, roof, dashboard, dials and the wheel.
+void Rally32::cockpitHud() {
+    auto poly = [&](std::initializer_list<std::pair<float, float>> pts, uint8_t r, uint8_t g, uint8_t b, float depth = 0.5f) {
+        std::vector<g32::Vtx> v;
+        for (auto& p : pts) {
+            g32::Vtx x;
+            x.x = p.first, x.y = p.second, x.r = r, x.g = g, x.b = b;
+            v.push_back(x);
+        }
+        for (size_t i = 1; i + 1 < v.size(); i++) gpu_.tri(v[0], v[i], v[i + 1], depth);
+    };
+    const float bob = car_.compress * 40;
+    // A-pillars and the roof lining.
+    poly({{0, 0}, {44, 0}, {14, 150}, {0, 162}}, 12, 12, 14);
+    poly({{320, 0}, {276, 0}, {306, 150}, {320, 162}}, 12, 12, 14);
+    poly({{0, 0}, {320, 0}, {320, 14}, {0, 14}}, 16, 16, 18);
+    poly({{130, 14}, {190, 14}, {186, 28}, {134, 28}}, 8, 8, 10);  // mirror
+    poly({{134, 16}, {186, 16}, {183, 25}, {137, 25}}, 40, 48, 60, 0.4f);
+    // Dashboard, rising to the binnacle behind the wheel.
+    poly({{0, 240}, {0, 176 + bob}, {60, 170 + bob}, {90, 156 + bob}, {150, 152 + bob}, {190, 164 + bob}, {320, 172 + bob}, {320, 240}}, 18, 18, 20);
+    poly({{0, 178 + bob}, {60, 172 + bob}, {90, 158 + bob}, {150, 154 + bob}, {190, 166 + bob}, {320, 174 + bob}, {320, 178 + bob},
+          {190, 170 + bob}, {150, 158 + bob}, {90, 162 + bob}, {60, 176 + bob}, {0, 182 + bob}},
+         34, 34, 38, 0.45f);
+    // Rev counter: a dial and a needle.
+    const float gx = 160, gy = 196 + bob;
+    for (int k = 0; k < 16; k++) {
+        const float a0 = k * 2 * PI / 16, a1 = (k + 1) * 2 * PI / 16;
+        poly({{gx, gy}, {gx + std::cos(a0) * 22, gy + std::sin(a0) * 22}, {gx + std::cos(a1) * 22, gy + std::sin(a1) * 22}}, 6, 6, 8, 0.3f);
+    }
+    const rc::CarSpec& cs = rc::carSpec(car_.specId);
+    const float na = PI * 0.75f + clampf(car_.rpm / cs.rpmMax, 0, 1) * PI * 1.5f;
+    poly({{gx - std::sin(na) * 2, gy + std::cos(na) * 2}, {gx + std::cos(na) * 20, gy + std::sin(na) * 20}, {gx + std::sin(na) * 2, gy - std::cos(na) * 2}},
+         128, 60, 10, 0.2f);
+    text(std::to_string(int(car_.kmh())), 160, 214 + bob, 1, 0x7fff);
+    text(car_.gear < 0 ? "R" : std::to_string(car_.gear), 196, 190 + bob, 1.6f, uint16_t(31 << 10 | 26 << 5));
+    // The steering wheel, turned by your hands.
+    const float cx = 104, cy = 236 + bob, turn = car_.steerIn * 2.1f;
+    for (int k = 0; k < 24; k++) {
+        const float a0 = k * 2 * PI / 24 + turn, a1 = (k + 1) * 2 * PI / 24 + turn;
+        poly({{cx + std::cos(a0) * 70, cy + std::sin(a0) * 70}, {cx + std::cos(a1) * 70, cy + std::sin(a1) * 70},
+              {cx + std::cos(a1) * 60, cy + std::sin(a1) * 60}, {cx + std::cos(a0) * 60, cy + std::sin(a0) * 60}},
+             10, 10, 12, 0.1f);
+    }
+    for (float a : {0.0f, PI, PI / 2}) {  // three spokes
+        const float s = a + turn;
+        const float px = -std::sin(s) * 6, py = std::cos(s) * 6;
+        poly({{cx + px, cy + py}, {cx + std::cos(s) * 62 + px, cy + std::sin(s) * 62 + py}, {cx + std::cos(s) * 62 - px, cy + std::sin(s) * 62 - py},
+              {cx - px, cy - py}},
+             22, 22, 24, 0.15f);
+    }
+    // The yellow top-dead-centre stripe.
+    const float ts = -PI / 2 + turn;
+    poly({{cx + std::cos(ts - 0.05f) * 60, cy + std::sin(ts - 0.05f) * 60}, {cx + std::cos(ts - 0.05f) * 70, cy + std::sin(ts - 0.05f) * 70},
+          {cx + std::cos(ts + 0.05f) * 70, cy + std::sin(ts + 0.05f) * 70}, {cx + std::cos(ts + 0.05f) * 60, cy + std::sin(ts + 0.05f) * 60}},
+         128, 100, 0, 0.05f);
 }
 
 }  // namespace rc32

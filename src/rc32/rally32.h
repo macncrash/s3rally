@@ -30,6 +30,7 @@ public:
     // Headless: drive a stage with the autopilot; returns the stage time (0 if it didn't finish).
     float simulate(int stage, int frames, std::vector<std::string>* shots, const std::string& dir);
     int lastTriangles() const { return gpu_.lastPrimitives(); }
+    void setView(int v) { view_ = v; }
     size_t textureBytes() const { return gpu_.texBytes(); }
 
 private:
@@ -64,6 +65,8 @@ private:
     float time_ = 0, best_ = 0;
     g32::Camera cam_;
     float camYaw_ = 0, camY_ = 0;
+    int view_ = 0;  // 0 chase, 1 cockpit, 2 far chase (V or Z)
+    void cockpitHud();
 };
 
 }  // namespace rc32

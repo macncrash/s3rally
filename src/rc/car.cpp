@@ -216,18 +216,22 @@ void Car::driveStep(const Course& c, const CarInput& in, float dt, bool manual) 
     // Steering: faster hands on a keyboard, less lock at speed.
     // Keys are on or off: turn in progressively, let go quickly (self-centring).
     const bool centring = std::fabs(in.steer) < std::fabs(steerIn) || in.steer * steerIn < 0;
-    const float rate = in.analog ? 12.0f : centring ? 7.0f : 2.6f;
+    const float rate = in.analog ? 12.0f : centring ? 9.0f : 3.0f;
     steerIn += clampf(in.steer - steerIn, -rate * dt, rate * dt);
     float lock = cs.steerMax / (1 + std::fabs(u) / 32);
     // Steering help (keyboard, or traction help on): full input asks for the tightest turn the tyres
     // can actually hold at this speed, not full lock, so a held key never spins the car.
+    // Steering into a slide (counter-steer) always gets the full lock.
+    const bool counter = std::fabs(drift()) > 0.06f && in.steer * drift() > 0;
     if ((!in.analog || in.assist) && std::fabs(u) > 6) {
-        const float useful = (cs.a + cs.b) * mu * GRAV * 1.05f / (u * u) + sf.peak * 0.9f;
+        float useful = (cs.a + cs.b) * mu * GRAV * 1.05f / (u * u) + sf.peak * 0.9f;
+        if (counter) useful += std::fabs(drift()) * 1.1f;  // as much opposite lock as the slide angle needs
         lock = std::min(lock, useful);
     }
     float pull = 0;
-    if (damage.suspension > 0.2f) pull += (damage.suspension - 0.2f) * 0.06f;
-    if (damage.puncture) pull += 0.03f * damage.puncture;
+    // Bent suspension pulls gently to one side (which side depends on the knock); a flat tyre pulls to its side.
+    if (damage.suspension > 0.2f) pull += (damage.suspension - 0.2f) * 0.015f * pullSide_;
+    if (damage.puncture) pull += 0.01f * damage.puncture;
     steerAngle = steerIn * lock + pull;
 
     // Load on each axle (weight moves forward under braking, back under power).
@@ -299,7 +303,8 @@ void Car::driveStep(const Course& c, const CarInput& in, float dt, bool manual) 
     if (in.assist && std::fabs(u) > 5) {
         const float rKin = u * std::tan(steerAngle) / L;
         const float excess = r - rKin;
-        if (std::fabs(excess) > 0.15f) dr -= 3.5f * (excess - (excess > 0 ? 0.15f : -0.15f));
+        // Only near a real spin: drifts are the point.
+        if (std::fabs(drift()) > 0.3f && std::fabs(excess) > 0.2f) dr -= 3.0f * (excess - (excess > 0 ? 0.2f : -0.2f));
     }
     // At walking pace the tyre model gets stiff: blend to plain kinematics.
     const float slowK = clampf((std::fabs(u) - 1.0f) / 3.0f, 0, 1);
@@ -453,6 +458,7 @@ void Car::collide(const Course& c, float dt) {
                 continue;
             }
             if (o.type == O_ROCK) {  // clipping a rock: a jolt, maybe a puncture or bent suspension
+                pullSide_ = x < o.off ? -1.0f : 1.0f;
                 ev.rockStrike = true;
                 ev.hit = spd * 0.4f;
                 vy += std::min(3.0f, spd * 0.08f);
