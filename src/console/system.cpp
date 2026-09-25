@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <vector>
@@ -74,9 +75,15 @@ System::~System() {
 std::string System::dataPath(const std::string& file) const {
     static std::string base;
     if (base.empty()) {
-        char* p = SDL_GetPrefPath("macncrash", "gensys16");
+        char* p = SDL_GetPrefPath("macncrash", "s3engine");
         base = p ? p : "./";
         SDL_free(p);
+        // Saves from before the rename live in the old folder next to it: bring them across once.
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        const fs::path old = fs::path(base).parent_path().parent_path() / "gensys16";
+        if (base != "./" && fs::is_directory(old, ec) && fs::is_empty(base, ec))
+            fs::copy(old, base, fs::copy_options::recursive | fs::copy_options::skip_existing, ec);
     }
     return base + file;
 }
@@ -483,7 +490,7 @@ void System::setLight(int r, int g, int b) {
 
 std::string System::loadBlob(const std::string& name) const {
 #ifdef __EMSCRIPTEN__
-    std::string js = "localStorage.getItem('gensys-" + name + "') || ''";
+    std::string js = "localStorage.getItem('s3-" + name + "') || localStorage.getItem('gensys-" + name + "') || ''";  // old key: saves from before the rename
     const char* v = emscripten_run_script_string(js.c_str());
     return v ? v : "";
 #else
@@ -497,7 +504,7 @@ std::string System::loadBlob(const std::string& name) const {
 void System::saveBlob(const std::string& name, const std::string& data) const {
     if (headless) return;
 #ifdef __EMSCRIPTEN__
-    EM_ASM({ try { localStorage.setItem('gensys-' + UTF8ToString($0), UTF8ToString($1)); } catch (e) {} }, name.c_str(), data.c_str());
+    EM_ASM({ try { localStorage.setItem('s3-' + UTF8ToString($0), UTF8ToString($1)); } catch (e) {} }, name.c_str(), data.c_str());
 #else
     std::ofstream(dataPath(name)) << data;
 #endif
@@ -522,9 +529,10 @@ void System::biosInit() {
         }
     vdp.A.clear();
     vdp.B.clear();
-    bitmapToPlane(alloc, vdp.A, 5, 8, logo, 0);
-    bitmapToPlane(alloc, vdp.B, 26, 14, textBitmap("16-BIT", {2, 5, 0, 0, 1}), 0);
-    bitmapToPlane(alloc, vdp.B, 8, 20, textBitmap("PRODUCED BY OR UNDER LICENSE", {1, 6, 0, 0, 1}), 0);
+    const int lx = std::max(0, (40 - (logo.w + 7) / 8 - 7) / 2);  // logo and "16-BIT" centred together
+    bitmapToPlane(alloc, vdp.A, lx, 8, logo, 0);
+    bitmapToPlane(alloc, vdp.B, lx + (logo.w + 7) / 8 + 1, 14, textBitmap("16-BIT", {2, 5, 0, 0, 1}), 0);
+    bitmapToPlane(alloc, vdp.B, 15, 20, textBitmap("S3 ENGINE", {1, 6, 0, 0, 1}), 0);
     bitmapToPlane(alloc, vdp.B, 14, 22, textBitmap("FROM MACNCRASH", {1, 6, 0, 0, 1}), 0);
     vdp.HUD.clear();
 }
