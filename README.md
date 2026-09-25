@@ -11,9 +11,9 @@
 
 ![(3) RALLY](https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/rc/trailer.gif)
 
-🎮 **[Play it now in your browser](https://macncrash.github.io/s3garally/)**, with no install.
+🎮 **[Play it now in your browser](https://macncrash.github.io/s3rally/)**, with no install.
 
-🧊 **[Play (3) RALLY 32 on the S3-32](https://macncrash.github.io/s3garally/32/)**, the 32-bit version in real 3D.
+🧊 **[Play (3) RALLY 32 on the S3-32](https://macncrash.github.io/s3rally/32/)**, the 32-bit version in real 3D.
 
 ▶ **[Watch the trailers](https://macncrash.github.io/s3garally-site/)**
 
@@ -113,7 +113,7 @@ games share the radio:
 
 ## Play in a browser
 
-**https://macncrash.github.io/s3garally/**
+**https://macncrash.github.io/s3rally/**
 
 The same C++ compiles to WebAssembly with Emscripten, so the browser runs the
 real console at 60 fps. There is no second codebase. The browser speaks the
