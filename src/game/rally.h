@@ -43,7 +43,7 @@ struct StageResult {
 
 class Rally : public gs::Cart {
 public:
-    const char* title() const override { return "S3 RALLY " S3_VERSION; }
+    const char* title() const override { return "S3 RUN " S3_VERSION; }
     void init(gs::System& sys) override;
     void frame(gs::System& sys) override;
 

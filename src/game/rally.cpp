@@ -240,6 +240,10 @@ void Rally::frame(gs::System& sys) {
             break;
         case Mode::Title:
             drive(autopilot(), true);
+            if (t_ > 30 && pad.pressed(gs::BTN_MODE) && sys.hasHome()) {
+                sys.eject();
+                break;
+            }
             if (t_ > 30 && (pad.pressed(gs::BTN_START) || pad.pressed(gs::BTN_C))) {
                 sfx_->menuSelect();
                 if (!profile_.valid()) {

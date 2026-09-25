@@ -128,6 +128,74 @@ void VDP::planeLine(const Plane& p, int y, int hs, int vs, uint16_t* out) const 
     }
 }
 
+// Road generator revision B: the rally surfaces. u is across the road
+// (-1..1 edge to edge), v along it in world units.
+int VDP::rallySurface(int style, float u, float au, int uc, int vc, int vcw, int band, bool detail, float v) const {
+    const bool track = au > 0.24f && au < 0.52f;  // where the wheels run
+    int idx = band ? 6 : 7;
+    switch (style) {
+        case ROAD_RUTS: {  // gravel: two swept wheel tracks, loose stones in the middle and at the edges
+            if (track) idx = 9;
+            else if (au < 0.12f) idx = 10;
+            if (detail) {
+                const uint32_t h = hash2(uc, vc);
+                const int every = track ? 23 : au > 0.8f ? 3 : 7;  // tracks swept clean, edges piled up
+                if (h % every == 0) idx = (h >> 8) & 1 ? 15 : 8;
+            }
+            break;
+        }
+        case ROAD_MUD: {  // mud: dark wet ruts and standing puddles
+            if (track) idx = 9;
+            const int pu = int(std::floor(u * 2.5f + 8)), pv = int(std::floor(v / 420.0f));
+            const uint32_t h = hash2(pu, pv);
+            if (h % 5 == 0) {
+                // A puddle: an ellipse in its cell.
+                const float cu = (u * 2.5f + 8) - float(pu) - 0.5f;
+                const float cv = v / 420.0f - float(pv) - 0.5f;
+                const float rad = 0.25f + float((h >> 8) % 100) / 500.0f;
+                if (cu * cu + cv * cv * 0.6f < rad * rad) {
+                    const uint32_t w = hash2(int(std::floor(u * 14)), vcw);
+                    idx = w % 9 == 0 ? 13 : (band ? 11 : 12);
+                    break;
+                }
+            }
+            if (detail && hash2(uc, vc) % 13 == 0) idx = 8;
+            break;
+        }
+        case ROAD_ICE: {  // sheet ice: long glassy streaks
+            if (track) idx = 9;
+            const uint32_t h = hash2(int(std::floor(u * 18)), int(std::floor(v / 700.0f)));
+            if (h % 4 == 0) idx = 14;
+            else if (detail && hash2(uc, vc) % 19 == 0) idx = 15;
+            break;
+        }
+        case ROAD_SNOW: {  // packed snow: polished wheel tracks, fresh snow at the edges
+            if (track) {
+                idx = 9;
+                if (detail && hash2(uc, vc) % 5 == 0) idx = 8;  // tyre tread marks
+            } else if (au > 0.86f) {
+                idx = 15;
+            } else if (detail && hash2(uc, vc) % 17 == 0) {
+                idx = 14;
+            }
+            break;
+        }
+        case ROAD_ROCKY: {  // rough mountain road: embedded rocks everywhere
+            if (track) idx = 9;
+            if (detail) {
+                const uint32_t big = hash2(int(std::floor(u * 12)), int(std::floor(v / 60.0f)));
+                const uint32_t h = hash2(uc, vc);
+                if (big % 9 == 0) idx = (big >> 9) & 1 ? 15 : 8;
+                else if (h % 6 == 0) idx = (h >> 8) % 3 == 0 ? 15 : 8;
+            }
+            break;
+        }
+        default:
+            break;
+    }
+    return idx;
+}
+
 // The road generator. Texture indices within the line's palette bank:
 //  1-3 ground (light, dark, speck)   4-5 verge   6-7 road   8 pebbles
 //  9 tyre tracks  10 centre ridge  11-13 water  14 paint  15 road speck
@@ -151,7 +219,9 @@ void VDP::roadLine(int y, uint16_t* out) const {
         int idx;
         if (au < 1.0f) {
             const int uc = int(std::floor(u * 40));
-            if (r.style == 2) {
+            if (r.style >= ROAD_RUTS) {
+                idx = rallySurface(r.style, u, au, uc, vc, vcw, band, detail, r.v);
+            } else if (r.style == 2) {
                 uint32_t h = hash2(int(std::floor(u * 14)), vcw);
                 idx = (h % 9 == 0) ? 13 : (band ? 11 : 12);
             } else if (r.style == 1) {
@@ -173,7 +243,14 @@ void VDP::roadLine(int y, uint16_t* out) const {
             if (detail && hash2(int(std::floor(u * 40)), vc) % 7 == 0) idx = 8;
         } else {
             const int ground = u < 0 ? r.left : r.right;
-            if (ground == 1) {
+            if (ground == GROUND_DROP) {  // the hillside falls away: the backdrop shows through
+                out[x] = 0;
+                continue;
+            }
+            if (ground == GROUND_SNOWWALL) {  // ploughed snow banked up beside the road
+                idx = au < 1.3f ? 14 : (band ? 1 : 2);
+                if (detail && hash2(int(std::floor(u * 30)), vc) % 6 == 0) idx = 3;
+            } else if (ground == 1) {
                 uint32_t h = hash2(int(std::floor(u * 5)), vcw / 2);
                 idx = (h % 7 == 0) ? 13 : (band ? 11 : 12);
             } else {

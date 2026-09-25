@@ -433,7 +433,7 @@ Bitmap paceIcon(int kind) {
 Bitmap logoBitmap() {
     Bitmap b(320, 104);
     Bitmap l1 = gs::textBitmap("S3", {3, 5, 15, 0, 1});
-    Bitmap l2 = gs::textBitmap("RALLY", {7, 1, 15, 0, 1});
+    Bitmap l2 = gs::textBitmap("RUN", {7, 1, 15, 0, 1});
     b.blit(l1, 160 - l1.w / 2, 0);
     b.blit(l2, 160 - l2.w / 2, 30);
     for (int y = 30; y < 104; y++)
@@ -685,7 +685,7 @@ void buildArt(gs::VDP& vdp, Art& a) {
     a.obj[O_CHEVRON] = gs::uploadMipped(vdp, chevron());
     a.obj[O_CROWD] = gs::uploadMipped(vdp, crowd(r));
     a.obj[O_FLAG] = gs::uploadMipped(vdp, flag());
-    a.obj[O_ARCH_START] = gs::uploadMipped(vdp, arch("S3 RALLY"));
+    a.obj[O_ARCH_START] = gs::uploadMipped(vdp, arch("S3 RUN"));
     a.obj[O_ARCH_CP] = gs::uploadMipped(vdp, arch("CHECKPOINT"));
     a.obj[O_TIRES] = gs::uploadMipped(vdp, tires());
     a.obj[O_BALE] = gs::uploadMipped(vdp, bale());

@@ -1,11 +1,13 @@
-// S3-16 with the S3 RALLY cartridge inserted.
+// S3-16 with its multi-cart: S3 RALLY CHAMPIONSHIP and S3 RUN.
 //
-//   s3                 play (window, sound, keyboard or gamepad)
-//   s3 --sim           headless: autopilot drives every stage, prints a report
-//   s3 --sim --shots D also saves screenshots into directory D
-//   s3 --quad [N]      N consoles (2-4) racing each other over the network, split screen
+//   s3                 play (window, sound, keyboard or gamepad): pick a game
+//   s3 --cart rally    go straight to S3 RALLY CHAMPIONSHIP (or --cart run)
+//   s3 --sim           headless: the autopilot drives every stage of both games, prints a report
+//   s3 --sim --cart X  just one game;  --shots D also saves screenshots into directory D
+//   s3 --quad [N]      N consoles (2-4) on one stage over the network, split screen
 //   s3 --record-quad F [N]  film an N-player autopilot match to F.mp4 (needs ffmpeg)
 //   s3 --versus-test [STAGE] [--players N] [--discover]  headless multiplayer test
+//   (these three take --cart run for S3 RUN; the default is S3 RALLY CHAMPIONSHIP)
 
 #include <algorithm>
 #include <chrono>
@@ -22,7 +24,45 @@
 #include "game/radio.h"
 #include "game/rally.h"
 #include "multi.h"
+#include "multicart.h"
+#include "rc/game.h"
+#include "trailer.h"
 #include "version.h"
+
+// S3 RALLY CHAMPIONSHIP: the autopilot drives all fifteen stages.
+static int simulateRally(const char* shotDir) {
+    gs::System sys(true);
+    auto cart = std::make_unique<rc::RallyChamp>();
+    auto t0 = std::chrono::steady_clock::now();
+    sys.bootCart(*cart);
+    const double bootMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    std::printf("S3 RALLY CHAMPIONSHIP headless simulation\n");
+    std::printf("boot %.0f ms, sprite ROM %.2f MB / %d MB, tiles %d / %d\n", bootMs, cart->romUsedMB(), gs::SPRITE_ROM_SIZE >> 20, cart->tilesUsed(),
+                gs::NUM_TILES);
+    for (int i = 0; i < 60; i++) sys.step();
+    t0 = std::chrono::steady_clock::now();
+    for (int i = 0; i < 120; i++) {
+        sys.step();
+        sys.render();
+    }
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count() / 120;
+    std::printf("frame (logic + VDP render) %.2f ms  (budget 16.7 ms)\n\n", ms);
+    std::vector<std::string> shots;
+    int failures = 0;
+    std::printf("%-10s %-14s %-7s %-9s %-7s %-5s %-6s %-6s %-5s %-5s %-6s %-4s %s\n", "VENUE", "STAGE", "RESULT", "TIME", "IDEAL", "KM", "TOP",
+                "JUMPS", "AIR", "HARD", "CRASH", "DMG", "POS");
+    for (int s = 0; s < rc::NUM_STAGES; s++) {
+        const auto r = cart->simulateStage(s, s % rc::NUM_CARS, shotDir ? &shots : nullptr, shotDir ? shotDir : "");
+        const rc::Course c = rc::buildCourse(s);
+        std::printf("%-10s %-14s %-7s %-9.1f %-7.1f %-5.2f %-6.0f %-6d %-5.1f %-5d %-6d %-4.0f %d\n", rc::venue(s / 3).name, c.name.c_str(),
+                    r.finished ? "FINISH" : "DNF", r.time, r.ideal, c.stageMetres / 1000, r.topKmh, r.jumps, r.airTime, r.hardLandings, r.crashes,
+                    r.damage * 100, r.rank);
+        if (!r.finished) failures++;
+    }
+    for (auto& p : shots) std::printf("screenshot %s\n", p.c_str());
+    std::printf("\n%s\n", failures ? "SOME STAGES NOT FINISHED" : "ALL STAGES FINISHED");
+    return failures ? 1 : 0;
+}
 
 static int simulate(const char* shotDir) {
     gs::System sys(true);
@@ -30,7 +70,7 @@ static int simulate(const char* shotDir) {
     auto t0 = std::chrono::steady_clock::now();
     sys.bootCart(cart);
     double bootMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-    std::printf("S3-16 headless simulation\n");
+    std::printf("S3 RUN headless simulation\n");
     std::printf("boot %.0f ms, sprite ROM %.2f MB / %d MB\n", bootMs, sys.vdp.romUsed() / 1048576.0,
                 gs::SPRITE_ROM_SIZE >> 20);
 
@@ -225,6 +265,9 @@ static int musicTest(const char* dir) {
 
 int main(int argc, char** argv) {
     bool sim = false;
+    std::string cartName;
+    for (int i = 1; i + 1 < argc; i++)
+        if (!std::strcmp(argv[i], "--cart")) cartName = argv[i + 1];
     const char* shots = nullptr;
     const char* radioWav = nullptr;
     for (int i = 1; i < argc; i++) {
@@ -239,16 +282,17 @@ int main(int argc, char** argv) {
                 disc |= !std::strcmp(argv[k], "--discover");
                 if (!std::strcmp(argv[k], "--players") && k + 1 < argc) players = std::atoi(argv[k + 1]);
             }
-            return versusTest(st, players, disc);
+            return versusTest(st, players, disc, cartName != "run");
         }
         else if (!std::strcmp(argv[i], "--quad")) {
             const int players = i + 1 < argc && std::isdigit(static_cast<unsigned char>(argv[i + 1][0])) ? std::atoi(argv[i + 1]) : 4;
-            return runQuad(players, 0);
+            return runQuad(players, 0, cartName != "run");
         }
         else if (!std::strcmp(argv[i], "--record-quad") && i + 1 < argc) {
             const int players = i + 2 < argc && std::isdigit(static_cast<unsigned char>(argv[i + 2][0])) ? std::atoi(argv[i + 2]) : 4;
-            return recordQuad(players, 0, argv[i + 1]);
+            return recordQuad(players, 0, argv[i + 1], cartName != "run");
         }
+        else if (!std::strcmp(argv[i], "--record-rally") && i + 1 < argc) return recordRally(argv[i + 1]);
         else if (!std::strcmp(argv[i], "--music-test") && i + 1 < argc) return musicTest(argv[i + 1]);
         else if (!std::strcmp(argv[i], "--music-dir")) {
             gs::System s(true);
@@ -256,7 +300,7 @@ int main(int argc, char** argv) {
             return 0;
         }
         else if (!std::strcmp(argv[i], "--version")) {
-            std::printf("S3 RALLY %s\n", S3_VERSION_STRING);
+            std::printf("S3-16 MULTI-CART (S3 RALLY CHAMPIONSHIP, S3 RUN) %s\n", S3_VERSION_STRING);
             return 0;
         }
         else if (!std::strcmp(argv[i], "--record") && i + 2 < argc) {
@@ -270,12 +314,22 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (sim) {
-        radioCheck(nullptr, 30);
-        return simulate(shots);
+        int rc = 0;
+        if (cartName != "rally") {
+            radioCheck(nullptr, 30);
+            rc |= simulate(shots);
+            std::printf("\n");
+        }
+        if (cartName != "run") rc |= simulateRally(shots);
+        return rc;
     }
     // On the heap: the console carries a 286 KB framebuffer, far bigger than a
     // WebAssembly stack. (Declared so the cart outlives the system board.)
-    auto cart = std::make_unique<rally::Rally>();
+    auto menu = std::make_unique<MultiCart>();
+    std::unique_ptr<gs::Cart> direct;
+    if (cartName == "rally") direct = std::make_unique<rc::RallyChamp>();
+    else if (cartName == "run") direct = std::make_unique<rally::Rally>();
     auto sys = std::make_unique<gs::System>();
-    return sys->run(*cart);
+    sys->setHome(*menu);
+    return sys->run(direct ? *direct : *menu);
 }

@@ -14,6 +14,7 @@
 
 #include "console/system.h"
 #include "game/rally.h"
+#include "rc/game.h"
 
 namespace {
 
@@ -21,20 +22,27 @@ constexpr uint16_t TEST_PORT = 47117;
 constexpr uint16_t TEST_DISCOVERY = 47216;  // private, so nothing else on 47016 interferes
 const char* DEMO_NAMES[4] = {"RADRACER", "NEON FOX", "BIG RED", "SIDEWAYS"};
 
-// One console in a session.
+// One console in a session, with either cartridge in it.
+template <class Cart>
 struct Seat {
     std::unique_ptr<gs::System> sys;
-    std::unique_ptr<rally::Rally> cart;
+    std::unique_ptr<Cart> cart;
 };
 
+const char* stageName(const rally::Rally*, int stage) { return rally::stageDef(stage).name; }
+const char* stageName(const rc::RallyChamp*, int stage) { return rc::venue(stage / 3).stages[stage % 3]; }
+int stageCount(const rally::Rally*) { return rally::NUM_STAGES; }
+int stageCount(const rc::RallyChamp*) { return rc::NUM_STAGES; }
+
 // Boot n consoles; seat 0 hosts, the others join it over UDP.
-bool startSession(std::vector<Seat>& seats, int n, int stage, bool discover, const std::vector<std::string>& names,
+template <class Cart>
+bool startSession(std::vector<Seat<Cart>>& seats, int n, int stage, bool discover, const std::vector<std::string>& names,
                   const std::vector<float>& skill) {
     for (int i = 0; i < n; i++) {
         if (int(seats.size()) <= i) {
-            Seat s;
+            Seat<Cart> s;
             s.sys = std::make_unique<gs::System>(true);
-            s.cart = std::make_unique<rally::Rally>();
+            s.cart = std::make_unique<Cart>();
             s.sys->bootCart(*s.cart);
             seats.push_back(std::move(s));
         }
@@ -49,8 +57,9 @@ bool startSession(std::vector<Seat>& seats, int n, int stage, bool discover, con
     return true;
 }
 
-bool allDone(const std::vector<Seat>& seats) {
-    for (const Seat& s : seats) {
+template <class Cart>
+bool allDone(const std::vector<Seat<Cart>>& seats) {
+    for (const Seat<Cart>& s : seats) {
         const auto r = s.cart->versusReport();
         if (!r.finished) return false;
         for (int k = 0; k < rally::MAX_PLAYERS; k++)
@@ -60,7 +69,8 @@ bool allDone(const std::vector<Seat>& seats) {
 }
 
 // Paste each console's 320x224 screen into a 2x2 grid with thin dividers.
-void composite(const std::vector<Seat>& seats, std::vector<uint32_t>& out) {
+template <class Cart>
+void composite(const std::vector<Seat<Cart>>& seats, std::vector<uint32_t>& out) {
     const int W = gs::SCREEN_W, H = gs::SCREEN_H;
     out.assign(size_t(W * 2) * H * 2, 0xff101010u);
     for (size_t i = 0; i < seats.size() && i < 4; i++) {
@@ -73,9 +83,10 @@ void composite(const std::vector<Seat>& seats, std::vector<uint32_t>& out) {
 
 }  // namespace
 
-int versusTest(int stage, int n, bool discover) {
+template <class Cart>
+int versusTestT(int stage, int n, bool discover) {
     n = std::clamp(n, 2, 4);
-    std::vector<Seat> seats;
+    std::vector<Seat<Cart>> seats;
     // Two players share a name on purpose: only the IDs tell them apart.
     std::vector<std::string> names = {"RADRACER", "RADRACER", "NEON FOX", "BIG RED"};
     if (!startSession(seats, n, stage, discover, names, {1.0f, 0.97f, 0.94f, 0.91f})) {
@@ -89,7 +100,7 @@ int versusTest(int stage, int n, bool discover) {
         for (auto& s : seats) s.sys->step();
         std::this_thread::sleep_for(std::chrono::microseconds(250));  // let loopback packets land, like a real frame gap
     }
-    std::printf("versus: %d players on %s (%s), %.1f s\n", n, rally::stageDef(stage).name,
+    std::printf("versus: %d players on %s (%s), %.1f s\n", n, stageName(seats[0].cart.get(), stage),
                 discover ? "found by LAN discovery" : "direct join", frames / 60.0);
     bool ok = allDone(seats);
     std::vector<float> myTime(static_cast<size_t>(n));
@@ -127,9 +138,10 @@ int versusTest(int stage, int n, bool discover) {
     return ok ? 0 : 1;
 }
 
-int recordQuad(int n, int stage, const char* mp4Path) {
+template <class Cart>
+int recordQuadT(int n, int stage, const char* mp4Path) {
     n = std::clamp(n, 2, 4);
-    std::vector<Seat> seats;
+    std::vector<Seat<Cart>> seats;
     std::vector<std::string> names(DEMO_NAMES, DEMO_NAMES + 4);
     if (!startSession(seats, n, stage, false, names, {1.0f, 0.985f, 0.97f, 0.955f})) return 1;
     seats[0].sys->apu.init(48000);  // the film carries player 1's sound
@@ -175,7 +187,8 @@ void quadAudio(void* user, Uint8* stream, int len) {
 }
 }  // namespace
 
-int runQuad(int n, int stage) {
+template <class Cart>
+int runQuadT(int n, int stage) {
     n = std::clamp(n, 2, 4);
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) return 1;
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
@@ -194,7 +207,7 @@ int runQuad(int n, int stage) {
         if (SDL_IsGameController(i))
             if (SDL_GameController* c = SDL_GameControllerOpen(i)) pads.push_back(c);
 
-    std::vector<Seat> seats;
+    std::vector<Seat<Cart>> seats;
     std::vector<std::string> names;
     for (int i = 0; i < n; i++) names.push_back(i == 0 || i < int(pads.size()) ? "PLAYER " + std::to_string(i + 1) : DEMO_NAMES[i]);
     std::vector<float> skill = {1.0f, 0.98f, 0.96f, 0.94f};
@@ -243,7 +256,7 @@ int runQuad(int n, int stage) {
             // A few seconds after everyone has finished, race again on the next stage.
             doneFor = allDone(seats) ? doneFor + 1 : 0;
             if (doneFor > 60 * 8) {
-                nextStage = (nextStage + 1) % rally::NUM_STAGES;
+                nextStage = (nextStage + 1) % stageCount(seats[0].cart.get());
                 startSession(seats, n, nextStage, false, names, skill);
                 doneFor = 0;
             }
@@ -271,4 +284,14 @@ int runQuad(int n, int stage) {
     seats.clear();
     SDL_Quit();
     return 0;
+}
+
+int versusTest(int stage, int players, bool discover, bool champ) {
+    return champ ? versusTestT<rc::RallyChamp>(stage, players, discover) : versusTestT<rally::Rally>(stage, players, discover);
+}
+int recordQuad(int players, int stage, const char* mp4Path, bool champ) {
+    return champ ? recordQuadT<rc::RallyChamp>(players, stage, mp4Path) : recordQuadT<rally::Rally>(players, stage, mp4Path);
+}
+int runQuad(int players, int stage, bool champ) {
+    return champ ? runQuadT<rc::RallyChamp>(players, stage) : runQuadT<rally::Rally>(players, stage);
 }

@@ -153,7 +153,7 @@ int Versus::slotOf(const gs::NetAddr& a) const {
 
 void Versus::send(const gs::NetAddr& to, int type, int slot) {
     Packet p{};
-    std::memcpy(p.magic, "GSR1", 4);
+    std::memcpy(p.magic, magic, 4);
     p.proto = PROTOCOL;
     p.type = uint8_t(type);
     p.stage = uint8_t(stage);
@@ -172,7 +172,7 @@ void Versus::send(const gs::NetAddr& to, int type, int slot) {
 void Versus::sendRoster() {
     for (int s = 0; s < MAX_PLAYERS; s++) {
         Packet p{};
-        std::memcpy(p.magic, "GSR1", 4);
+        std::memcpy(p.magic, magic, 4);
         p.proto = PROTOCOL;
         p.type = ROSTER;
         p.stage = uint8_t(stage);
@@ -190,7 +190,7 @@ void Versus::sendRoster() {
 void Versus::sendState(const CarState& me) {
     if (phase != Phase::Ready) return;
     Packet p{};
-    std::memcpy(p.magic, "GSR1", 4);
+    std::memcpy(p.magic, magic, 4);
     p.proto = PROTOCOL;
     p.type = STATE;
     p.slot = uint8_t(mySlot);
@@ -226,13 +226,13 @@ void Versus::handle(const void* data, int len, const gs::NetAddr& from) {
     if (len != int(sizeof(Packet))) return;
     Packet p;
     std::memcpy(&p, data, sizeof p);
-    if (std::memcmp(p.magic, "GSR1", 4) != 0 || p.proto != PROTOCOL) return;
+    if (std::memcmp(p.magic, magic, 4) != 0 || p.proto != PROTOCOL) return;  // another game, or another version
     NETLOG("%s got type %d slot %d from %s:%d\n", isHost ? "host" : "player", p.type, p.slot, from.str().c_str(), from.port);
 
     if (p.type == QUERY) {  // someone is looking for games: answer them directly
         if (isHost && !started && (phase == Phase::Hosting || phase == Phase::Ready)) {
             Packet a{};
-            std::memcpy(a.magic, "GSR1", 4);
+            std::memcpy(a.magic, magic, 4);
             a.proto = PROTOCOL;
             a.type = ANNOUNCE;
             a.stage = uint8_t(stage);
@@ -421,7 +421,7 @@ void Versus::tick() {
         case Phase::Searching:
             if (frame_ % 30 == 1) {  // ask the network (and this machine) for games
                 Packet q{};
-                std::memcpy(q.magic, "GSR1", 4);
+                std::memcpy(q.magic, magic, 4);
                 q.proto = PROTOCOL;
                 q.type = QUERY;
                 game_.broadcast(discoveryPort, &q, sizeof q);

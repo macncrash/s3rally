@@ -25,10 +25,12 @@ jobs:
       - run: make -j4
       - run: ./s3 --version
       - run: ./s3 --sim
-      - run: ./s3 --versus-test 0 --discover
-      - run: ./s3 --versus-test 2
-      - run: ./s3 --versus-test 1 --players 4
-      - run: ./s3 --versus-test 3 --players 4 --discover
+      - run: ./s3 --versus-test 0 --players 4
+      - run: ./s3 --versus-test 7 --players 3 --discover
+      - run: ./s3 --versus-test 0 --discover --cart run
+      - run: ./s3 --versus-test 2 --cart run
+      - run: ./s3 --versus-test 1 --players 4 --cart run
+      - run: ./s3 --versus-test 3 --players 4 --discover --cart run
 
   web:
     runs-on: ubuntu-latest

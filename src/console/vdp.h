@@ -62,6 +62,10 @@ struct Sprite {
     int16_t clipY = SCREEN_H;  // rows at or below this screen line are not drawn
 };
 
+// Road generator revision B: rally surface textures and roadside ground types.
+enum RoadStyle : uint8_t { ROAD_RUTS = 4, ROAD_MUD = 5, ROAD_ICE = 6, ROAD_SNOW = 7, ROAD_ROCKY = 8 };
+enum Ground : uint8_t { GROUND_LAND = 0, GROUND_WATER = 1, GROUND_SNOWWALL = 2, GROUND_DROP = 3 };
+
 // Road generator parameters for one scanline.
 struct RoadLine {
     bool on = false;
@@ -70,8 +74,8 @@ struct RoadLine {
     float v = 0;      // texture distance coordinate (world units)
     uint8_t pal = 12; // palette bank for this line's surface
     uint8_t band = 0; // light/dark band
-    uint8_t style = 0; // 0 dirt, 1 tarmac (centre line), 2 water, 3 snow
-    uint8_t left = 0, right = 0; // ground: 0 grass/sand/snow, 1 water
+    uint8_t style = 0; // 0 dirt, 1 tarmac (centre line), 2 water, 3 snow; rev B adds ROAD_RUTS..ROAD_ROCKY
+    uint8_t left = 0, right = 0; // ground: 0 grass/sand/snow, 1 water, GROUND_SNOWWALL, GROUND_DROP
 };
 
 class VDP {
@@ -110,6 +114,7 @@ private:
     void rebuildLut();
     void planeLine(const Plane& p, int y, int hs, int vs, uint16_t* out) const;
     void roadLine(int y, uint16_t* out) const;
+    int rallySurface(int style, float u, float au, int uc, int vc, int vcw, int band, bool detail, float v) const;
     void spriteLine(int y);
 
     std::vector<uint8_t> tiles_;

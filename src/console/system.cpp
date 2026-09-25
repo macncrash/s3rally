@@ -38,7 +38,7 @@ int System::keyButton(int k) {
         case SDLK_DOWN: return BTN_DOWN;
         case SDLK_LEFT: return BTN_LEFT;
         case SDLK_RIGHT: return BTN_RIGHT;
-        case SDLK_z: return BTN_A;
+        case SDLK_z: case SDLK_v: return BTN_A;
         case SDLK_x: return BTN_B;
         case SDLK_c: return BTN_C;
         case SDLK_SPACE: return BTN_TURBO;
@@ -100,6 +100,10 @@ void System::powerOn(Cart& cart) {
 
 void System::step() {
     pad.latch();
+    if (ejectPending_ && home_) {  // back to the menu between frames, never inside a cart's frame
+        ejectPending_ = false;
+        bootCart(*home_);
+    }
     if (inBios_) {
         if (biosStep()) bootCart(*cart_);
     } else if (cart_) {
@@ -397,6 +401,8 @@ void Controller::resetMap() {
     map[SDL_CONTROLLER_BUTTON_RIGHTSTICK] = BTN_TURBO;
     map[SDL_CONTROLLER_BUTTON_LEFTSHOULDER] = BTN_X;   // shift down
     map[SDL_CONTROLLER_BUTTON_RIGHTSHOULDER] = BTN_Y;  // shift up
+    map[SDL_CONTROLLER_BUTTON_TOUCHPAD] = BTN_A;       // change view (touchpad / share)
+    map[SDL_CONTROLLER_BUTTON_MISC1] = BTN_A;
     map[SDL_CONTROLLER_BUTTON_DPAD_UP] = BTN_UP;
     map[SDL_CONTROLLER_BUTTON_DPAD_DOWN] = BTN_DOWN;
     map[SDL_CONTROLLER_BUTTON_DPAD_LEFT] = BTN_LEFT;

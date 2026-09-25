@@ -90,6 +90,12 @@ public:
     void rumble(float low, float high, int ms);
     void setLight(int r, int g, int b);
     void quit() { quit_ = true; }
+    // A multi-cart menu the games can hand back to (ESC on a title screen).
+    void setHome(Cart& home) { home_ = &home; }
+    bool hasHome() const { return home_ != nullptr && home_ != cart_; }
+    void eject() {
+        if (hasHome()) ejectPending_ = true;
+    }
 
     VDP vdp;
     APU apu;
@@ -111,6 +117,8 @@ private:
     void chime();
 
     Cart* cart_ = nullptr;
+    Cart* home_ = nullptr;
+    bool ejectPending_ = false;
     bool inBios_ = false;
     bool quit_ = false;
     SDL_Window* win_ = nullptr;

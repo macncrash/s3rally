@@ -83,6 +83,8 @@ public:
     std::vector<HostInfo> hosts;
     uint16_t gamePort = 0;
     uint16_t discoveryPort = DISCOVERY_PORT;  // overridable (tests)
+    // Packet signature: each cartridge has its own, so games never see each other's sessions.
+    char magic[5] = "GSR1";
 
     struct Packet;
 

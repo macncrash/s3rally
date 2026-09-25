@@ -28,6 +28,27 @@ each side. The chip draws grass or sand, verges, dirt with pebbles and tyre
 tracks, tarmac with kerbs and a centre line, water fords, and lake shores. The
 texture scrolls with `v` and loses detail with distance.
 
+**Road generator revision B** (added for S3 RALLY CHAMPIONSHIP; the original
+styles 0-3 are unchanged, so older cartridges render exactly as before):
+
+| Style | Surface | Texture |
+|---|---|---|
+| `ROAD_RUTS` (4) | gravel | two swept wheel tracks, loose stones in the middle and piled at the edges |
+| `ROAD_MUD` (5) | mud | dark wet ruts and standing puddles that shimmer (they use the water entries) |
+| `ROAD_ICE` (6) | sheet ice | long glassy streaks along the road |
+| `ROAD_SNOW` (7) | packed snow | polished tyre tracks with tread marks, fresh snow at the edges |
+| `ROAD_ROCKY` (8) | rough mountain road | embedded rocks, large and small |
+
+Two new roadside ground types join land (0) and water (1): `GROUND_SNOWWALL` (2),
+ploughed snow banked beside the road, and `GROUND_DROP` (3), where the ground falls
+away and the road layer is transparent so the backdrop planes show through (the
+valley below a mountain road).
+
+The cart chooses the texture per scanline, so one frame can show gravel turning to
+tarmac, an ice patch, or a mud hole. Palette indices within the line's bank:
+1-3 ground, 4-5 verge, 6-7 road bands, 8 dark detail, 9 tyre tracks, 10 centre
+ridge, 11-13 water, 14 highlight (snow wall, ice sheen), 15 light detail.
+
 **Fog.** The fog colour register is blended per scanline into planes and road,
 and per sprite into sprites, at 17 levels.
 
@@ -74,3 +95,14 @@ class Cart {
     virtual void frame(gs::System&);  // 60 times a second
 };
 ```
+
+## Multi-cart
+
+The console boots into a multi-cart menu after the logo: **S3 RALLY
+CHAMPIONSHIP** or **S3 RUN**. A cart calls `System::eject()` (both do on ESC
+from their title screen) and the console returns to the menu between frames,
+like pressing reset. `System::setHome()` names the menu cart; `--cart rally` or
+`--cart run` on the command line skips it.
+
+Each cart has its own network signature (`Versus::magic`), so a S3 RUN
+lobby never lists a Rally Championship session, and the other way round.
