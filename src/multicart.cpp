@@ -73,16 +73,16 @@ void MultiCart::draw(gs::System& sys) {
         }
     };
     auto centre = [&](int row, const std::string& s, int pal) { put(20 - int(s.size()) / 2, row, s, pal); };
-    centre(8, "MULTI-CART  -  CHOOSE A GAME", 0);
+    centre(6, "MULTI-CART  -  CHOOSE A GAME", 0);
     for (int i = 0; i < 3; i++) {
-        const int row = 10 + i * 5;
+        const int row = 9 + i * 5;
         const bool on = i == sel_;
         centre(row, (on ? "> " : "  ") + std::string(GAMES[i].name) + (on ? " <" : "  "), on ? 15 : 0);
         centre(row + 2, GAMES[i].line1, 0);
         centre(row + 3, GAMES[i].line2, 0);
     }
-    if (t_ % 60 < 40) centre(24, "PRESS START", 15);
-    centre(26, "ESC ON A TITLE SCREEN COMES BACK HERE", 0);
+    if (t_ % 60 < 40) centre(23, "PRESS START", 15);
+    centre(25, "ESC ON A TITLE SCREEN COMES BACK HERE", 0);
     put(39 - int(std::string(S3_VERSION_STRING).size()), 27, S3_VERSION_STRING, 0);
 }
 
