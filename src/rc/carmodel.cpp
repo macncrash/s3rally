@@ -247,3 +247,24 @@ gs::Bitmap renderCar(float yaw, float pitch, float roll, float elevation) {
 }
 
 }  // namespace rc
+
+namespace rc {
+
+const std::vector<CarPoly>& carPolys() {
+    static const std::vector<CarPoly> polys = [] {
+        std::vector<CarPoly> out;
+        for (const Face& f : model().faces) {
+            CarPoly p;
+            for (const V3& v : f.p) p.xyz.insert(p.xyz.end(), {v.x, v.y, v.z});
+            p.mat = int(f.m);
+            p.twoSided = f.twoSided;
+            out.push_back(std::move(p));
+        }
+        return out;
+    }();
+    return polys;
+}
+
+int carColorIndex(int mat, float lit) { return shade(Mat(mat), lit); }
+
+}  // namespace rc

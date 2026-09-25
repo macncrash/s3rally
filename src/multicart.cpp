@@ -6,6 +6,7 @@
 #include "console/gfx.h"
 #include "game/rally.h"
 #include "rc/game.h"
+#include "rc32/rally32.h"
 #include "version.h"
 
 namespace {
@@ -14,8 +15,9 @@ struct Entry {
     const char* line1;
     const char* line2;
 };
-const Entry GAMES[2] = {
+const Entry GAMES[3] = {
     {"(3) RALLY", "REAL RALLY: FIVE COUNTRIES, 15 STAGES", "JUMPS, MUD, SNOW, ICE. COCKPIT VIEW."},
+    {"(3) RALLY 32", "S3-32 PREVIEW: THE SAME RALLY", "IN REAL 3D ON THE 32-BIT MACHINE."},
     {"S3 RUN", "THE ORIGINAL ARCADE RACER", "BEAT THE CLOCK, PASS THE PACK."},
 };
 }  // namespace
@@ -56,7 +58,7 @@ void MultiCart::init(gs::System& sys) {
     v.B.scroll(0, 0);
     for (int y = 0; y < gs::SCREEN_H; y++) v.lineBackdrop[y] = gs::rgb4(0, 0, std::min(8, 2 + y / 32));
     const std::string last = sys.loadBlob("cart.txt");
-    sel_ = last == "run" ? 1 : 0;
+    sel_ = last == "run" ? 2 : last == "rally32" ? 1 : 0;
     t_ = 0;
 }
 
@@ -72,8 +74,8 @@ void MultiCart::draw(gs::System& sys) {
     };
     auto centre = [&](int row, const std::string& s, int pal) { put(20 - int(s.size()) / 2, row, s, pal); };
     centre(8, "MULTI-CART  -  CHOOSE A GAME", 0);
-    for (int i = 0; i < 2; i++) {
-        const int row = 11 + i * 6;
+    for (int i = 0; i < 3; i++) {
+        const int row = 10 + i * 5;
         const bool on = i == sel_;
         centre(row, (on ? "> " : "  ") + std::string(GAMES[i].name) + (on ? " <" : "  "), on ? 15 : 0);
         centre(row + 2, GAMES[i].line1, 0);
@@ -87,14 +89,18 @@ void MultiCart::draw(gs::System& sys) {
 void MultiCart::frame(gs::System& sys) {
     t_++;
     gs::Pad& pad = sys.pad;
-    if (pad.pressed(gs::BTN_UP) || pad.pressed(gs::BTN_DOWN)) sel_ ^= 1;
+    if (pad.pressed(gs::BTN_UP)) sel_ = (sel_ + 2) % 3;
+    if (pad.pressed(gs::BTN_DOWN)) sel_ = (sel_ + 1) % 3;
     draw(sys);
     if (t_ > 10 && (pad.pressed(gs::BTN_START) || pad.pressed(gs::BTN_C))) {
-        sys.saveBlob("cart.txt", sel_ == 0 ? "rally" : "run");
+        sys.saveBlob("cart.txt", sel_ == 0 ? "rally" : sel_ == 1 ? "rally32" : "run");
         gs::Cart* c;
         if (sel_ == 0) {
             if (!champ_) champ_ = std::make_unique<rc::RallyChamp>();
             c = champ_.get();
+        } else if (sel_ == 1) {
+            if (!r32_) r32_ = std::make_unique<rc32::Rally32>();
+            c = r32_.get();
         } else {
             if (!run_) run_ = std::make_unique<rally::Rally>();
             c = run_.get();

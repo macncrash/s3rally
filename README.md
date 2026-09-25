@@ -81,6 +81,18 @@ flying off.
   <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/rc/stage-intro.png" width="32%"> <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/rc/times.png" width="32%"> <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/rc/service.png" width="32%">
 </p>
 
+## (3) RALLY 32: the S3-32
+
+The start of the 32-bit console: a polygon GPU in the style of the mid-90s machines,
+with 15-bit colour, Gouraud shading, affine textures, depth fog, transparency and an
+ordering table in place of a depth buffer. It runs on the same board as the
+16-bit machine, with the same pad, controls, menus and sound chip. Its first
+cartridge, **(3) RALLY 32**, drives the same fifteen stages with the same car physics
+and scenery in real 3D. The road has the shape of the land, and the car is lit
+polygons. Pick it from the multi-cart menu, or run `./s3 --cart rally32`. The
+design and the plan for hosting many consoles on one engine are in
+**[docs/S3-32.md](docs/S3-32.md)**.
+
 ## S3 RUN
 
 The original: a four-stage arcade racer in the OutRun mould. It also lives on as its own game,
@@ -254,6 +266,8 @@ src/rc/        (3) RALLY: course (venues, stages, pace notes) · car (physics)
                carmodel (3D car sprites) · art · voice (co-driver) · game · drive · render · online
 src/game/      S3 RUN: rally (game, physics, AI, HUD) · stages · art · sound
                shared by both: radio (songs + sequencer) · profile · versus (network sessions)
+src/g32/       S3-32: gpu (polygons, ordering table, fog, dithering) · gte (camera, clipping)
+src/rc32/      (3) RALLY 32: the rally in 3D on the S3-32
 src/           main · multicart (the menu) · multi (several consoles in one process)
 ```
 

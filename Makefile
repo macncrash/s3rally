@@ -7,7 +7,7 @@ SDL_LIBS   := $(shell $(SDL2_CONFIG) --libs)
 BUILD_ID   := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 CXXFLAGS ?= -O2 -g
 CXXFLAGS += -std=c++17 -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -MMD -MP $(SDL_CFLAGS) -Isrc -DS3_BUILD='"$(BUILD_ID)"'
-SRC := $(wildcard src/console/*.cpp src/game/*.cpp src/rc/*.cpp src/*.cpp)
+SRC := $(wildcard src/console/*.cpp src/game/*.cpp src/rc/*.cpp src/g32/*.cpp src/rc32/*.cpp src/*.cpp)
 OBJ := $(SRC:src/%.cpp=build/%.o)
 
 s3: $(OBJ)

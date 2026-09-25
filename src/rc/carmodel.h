@@ -2,6 +2,8 @@
 // into sprite ROM from every angle when the cartridge boots (the way 90s
 // games pre-rendered their cars), so it can slide, spin and tumble.
 #pragma once
+#include <vector>
+
 #include "console/gfx.h"
 
 namespace rc {
@@ -17,5 +19,15 @@ constexpr int ROLL_FRAMES = 12;  // one full roll over
 
 // yaw: radians, 0 = seen from behind, positive = nose turned to the viewer's right.
 gs::Bitmap renderCar(float yaw, float pitch, float roll, float elevation);
+
+// The same model as polygons, for machines that draw in 3D (S3-32). Metres, x right,
+// y up, z forward; `mat` picks a car palette colour through carColorIndex().
+struct CarPoly {
+    std::vector<float> xyz;  // 3 per vertex, outward winding
+    int mat;
+    bool twoSided;
+};
+const std::vector<CarPoly>& carPolys();
+int carColorIndex(int mat, float lit);  // lit 0..1 -> car palette index (1-15)
 
 }  // namespace rc

@@ -7,6 +7,7 @@
 
 namespace rally { class Rally; }
 namespace rc { class RallyChamp; }
+namespace rc32 { class Rally32; }
 
 class MultiCart : public gs::Cart {
 public:
@@ -23,4 +24,5 @@ private:
     int fontTile_[96] = {};
     std::unique_ptr<rc::RallyChamp> champ_;
     std::unique_ptr<rally::Rally> run_;
+    std::unique_ptr<rc32::Rally32> r32_;
 };

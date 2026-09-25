@@ -112,7 +112,13 @@ void System::step() {
     frame++;
 }
 
-void System::render() { vdp.render(fb); }
+void System::render() {
+    if (!inBios_ && cart_ && cart_->video(shown, shownW, shownH)) return;
+    vdp.render(fb);
+    shown = fb;
+    shownW = SCREEN_W;
+    shownH = SCREEN_H;
+}
 
 static void putBE(std::vector<uint8_t>& v, uint32_t x) {
     for (int s = 24; s >= 0; s -= 8) v.push_back(uint8_t(x >> s));
@@ -178,8 +184,8 @@ static bool writePng(const std::string& path, const uint32_t* px, int w, int h) 
 }
 
 bool System::saveScreenshot(const std::string& path) {
-    if (path.size() > 4 && path.compare(path.size() - 4, 4, ".png") == 0) return writePng(path, fb, SCREEN_W, SCREEN_H);
-    SDL_Surface* s = SDL_CreateRGBSurfaceWithFormatFrom(fb, SCREEN_W, SCREEN_H, 32, SCREEN_W * 4, SDL_PIXELFORMAT_ARGB8888);
+    if (path.size() > 4 && path.compare(path.size() - 4, 4, ".png") == 0) return writePng(path, shown, shownW, shownH);
+    SDL_Surface* s = SDL_CreateRGBSurfaceWithFormatFrom(const_cast<uint32_t*>(shown), shownW, shownH, 32, shownW * 4, SDL_PIXELFORMAT_ARGB8888);
     if (!s) return false;
     bool ok = SDL_SaveBMP(s, path.c_str()) == 0;
     SDL_FreeSurface(s);
@@ -360,7 +366,13 @@ void System::readController(_SDL_GameController* ctl_, Controller& ctl, Pad& pad
 }
 
 void System::present() {
-    SDL_UpdateTexture(tex_, nullptr, fb, SCREEN_W * 4);
+    int tw = 0, th = 0;
+    SDL_QueryTexture(tex_, nullptr, nullptr, &tw, &th);
+    if (tw != shownW || th != shownH) {  // another console, another resolution
+        SDL_DestroyTexture(tex_);
+        tex_ = SDL_CreateTexture(ren_, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, shownW, shownH);
+    }
+    SDL_UpdateTexture(tex_, nullptr, shown, shownW * 4);
     int ww, wh;
     SDL_GetRendererOutputSize(ren_, &ww, &wh);
     // 4:3 display, letterboxed.
@@ -375,13 +387,14 @@ void System::present() {
     SDL_RenderCopy(ren_, tex_, nullptr, &dst);
     if (crt) {
         // Scanlines: darken the lower part of every source row.
-        float rowH = float(dh) / SCREEN_H;
+        const float rowH = float(dh) / shownH;
         if (rowH >= 2.5f) {
             SDL_SetRenderDrawColor(ren_, 0, 0, 0, 90);
-            static SDL_FRect rects[SCREEN_H];
-            for (int y = 0; y < SCREEN_H; y++)
-                rects[y] = SDL_FRect{float(dst.x), dst.y + (y + 0.62f) * rowH, float(dw), rowH * 0.38f};
-            SDL_RenderFillRectsF(ren_, rects, SCREEN_H);
+            static std::vector<SDL_FRect> rects;
+            rects.resize(size_t(shownH));
+            for (int y = 0; y < shownH; y++)
+                rects[size_t(y)] = SDL_FRect{float(dst.x), dst.y + (y + 0.62f) * rowH, float(dw), rowH * 0.38f};
+            SDL_RenderFillRectsF(ren_, rects.data(), shownH);
         }
     }
     SDL_RenderPresent(ren_);

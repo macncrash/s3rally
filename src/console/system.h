@@ -60,6 +60,12 @@ public:
     virtual const char* title() const = 0;
     virtual void init(System& sys) = 0;
     virtual void frame(System& sys) = 0;  // 60 times a second
+    // A cartridge that brings its own video hardware (S3-32) draws its frame here and
+    // hands it to the board; the default is the S3-16 VDP.
+    virtual bool video(const uint32_t*& px, int& w, int& h) {
+        (void)px, (void)w, (void)h;
+        return false;
+    }
 };
 
 class System {
@@ -103,6 +109,9 @@ public:
     Controller ctl;
     uint64_t frame = 0;
     uint32_t fb[SCREEN_W * SCREEN_H] = {};
+    // The frame on show: the VDP's, or the one a cartridge's own video hardware drew.
+    const uint32_t* shown = fb;
+    int shownW = SCREEN_W, shownH = SCREEN_H;
     bool headless;
     bool scripted = false;  // headless, but input comes from the pad (demo recording)
     std::string typed;  // recent keyboard letters/digits, ' ', "\n" Enter, "\b" Backspace (cheat codes, name entry)
