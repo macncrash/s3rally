@@ -9,13 +9,9 @@
 ![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20browser-lightgrey)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-![(3) RALLY](https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/rc/trailer.gif)
-
 🎮 **[Play it now in your browser](https://macncrash.github.io/s3rally/)**, with no install.
 
 🧊 **[Play (3) RALLY 32 on the S3-32](https://macncrash.github.io/s3rally/32/)**, the 32-bit version in real 3D.
-
-▶ **[Watch the trailers](https://macncrash.github.io/s3garally-site/)**
 
 </div>
 
@@ -76,12 +72,6 @@ flying off.
   against your own ghost, and **Online** for up to four crews. There are three
   levels (AMATEUR, PRO, LEGEND) and three cars, including a rear-drive legend
   that is a handful. **Driving help** is on by default: a held arrow key asks for the tightest turn the tyres can hold (never a spin-inducing full lock), spins are damped early, wheelspin is limited, and the soft ground past the edge scrubs off speed before you reach the trees. Turn it off on the car screen for the raw car.
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/rc/finland.png" width="32%"> <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/rc/norway-night.png" width="32%"> <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/rc/australia-dusk.png" width="32%"><br>
-  <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/rc/cockpit.png" width="32%"> <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/rc/jump.png" width="32%"> <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/rc/cyprus.png" width="32%"><br>
-  <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/rc/stage-intro.png" width="32%"> <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/rc/times.png" width="32%"> <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/rc/service.png" width="32%">
-</p>
 
 ## (3) RALLY 32: the S3-32
 
