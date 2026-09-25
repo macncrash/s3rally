@@ -1,4 +1,4 @@
-// S3 RALLY CHAMPIONSHIP - the car.
+// (3) RALLY - the car.
 //
 // A two-axle ("bicycle") vehicle model driven along the stage in road
 // coordinates: distance s along the road, x across it, heading psi relative

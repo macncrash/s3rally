@@ -1,4 +1,4 @@
-// S3 RALLY CHAMPIONSHIP - the co-driver's voice.
+// (3) RALLY - the co-driver's voice.
 //
 // Every phrase in PHRASE_TEXT is recorded once as a PCM sample (on macOS the
 // `say` command makes them the first time the game runs; they are kept in the

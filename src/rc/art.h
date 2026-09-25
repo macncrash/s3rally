@@ -1,4 +1,4 @@
-// S3 RALLY CHAMPIONSHIP - graphics, generated when the cartridge boots.
+// (3) RALLY - graphics, generated when the cartridge boots.
 #pragma once
 #include "car.h"
 #include "carmodel.h"

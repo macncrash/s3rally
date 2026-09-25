@@ -1,4 +1,4 @@
-// S3 RALLY CHAMPIONSHIP - flow: menus, rallies, service, results.
+// (3) RALLY - flow: menus, rallies, service, results.
 
 #include "game.h"
 

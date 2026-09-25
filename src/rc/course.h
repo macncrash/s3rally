@@ -1,4 +1,4 @@
-// S3 RALLY CHAMPIONSHIP - venues, special stages and pace notes.
+// (3) RALLY - venues, special stages and pace notes.
 //
 // A stage is point to point: a start, two split points and a flying finish.
 // It is built from real road geometry: corners have a radius (the pace note

@@ -28,7 +28,7 @@ each side. The chip draws grass or sand, verges, dirt with pebbles and tyre
 tracks, tarmac with kerbs and a centre line, water fords, and lake shores. The
 texture scrolls with `v` and loses detail with distance.
 
-**Road generator revision B** (added for S3 RALLY CHAMPIONSHIP; the original
+**Road generator revision B** (added for (3) RALLY; the original
 styles 0-3 are unchanged, so older cartridges render exactly as before):
 
 | Style | Surface | Texture |
@@ -105,4 +105,4 @@ like pressing reset. `System::setHome()` names the menu cart; `--cart rally` or
 `--cart run` on the command line skips it.
 
 Each cart has its own network signature (`Versus::magic`), so a S3 RUN
-lobby never lists a Rally Championship session, and the other way round.
+lobby never lists a (3) Rally session, and the other way round.

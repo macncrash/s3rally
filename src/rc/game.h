@@ -1,4 +1,4 @@
-// S3 RALLY CHAMPIONSHIP - the cartridge.
+// (3) RALLY - the cartridge.
 //
 // Real rallying: special stages driven against the clock, one car at a time,
 // starting ten seconds apart. Five rallies of three stages each, with a
@@ -66,7 +66,7 @@ class RallyChamp : public gs::Cart {
 public:
     RallyChamp();
     ~RallyChamp() override;
-    const char* title() const override { return "S3 RALLY CHAMPIONSHIP " S3_VERSION; }
+    const char* title() const override { return "(3) RALLY " S3_VERSION; }
     void init(gs::System& sys) override;
     void frame(gs::System& sys) override;
 

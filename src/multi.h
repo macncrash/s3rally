@@ -1,7 +1,7 @@
 // Several complete S3-16 consoles in one process, racing each other over
 // the real network code (UDP on this machine). Used for the automated
 // multiplayer test, a live four-way split screen, and filming matches.
-// `champ` picks the cartridge: S3 RALLY CHAMPIONSHIP (true) or S3 RUN.
+// `champ` picks the cartridge: (3) RALLY (true) or S3 RUN.
 #pragma once
 
 // Headless: n consoles (2-4) race; checks everyone sees everyone and agrees on the result.

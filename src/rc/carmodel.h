@@ -1,4 +1,4 @@
-// S3 RALLY CHAMPIONSHIP - the rally car as a small 3D model, rendered
+// (3) RALLY - the rally car as a small 3D model, rendered
 // into sprite ROM from every angle when the cartridge boots (the way 90s
 // games pre-rendered their cars), so it can slide, spin and tumble.
 #pragma once

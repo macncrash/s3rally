@@ -513,12 +513,10 @@ Bitmap damageIcon(int kind) {
 
 Bitmap logoBitmap() {
     Bitmap b(320, 132);
-    Bitmap l1 = gs::textBitmap("S3", {3, 5, 15, 0, 1});
+    Bitmap l1 = gs::textBitmap("(3)", {4, 5, 15, 0, 1});
     Bitmap l2 = gs::textBitmap("RALLY", {7, 1, 15, 0, 1});
-    Bitmap l3 = gs::textBitmap("CHAMPIONSHIP", {3, 5, 15, 0, 1});
     b.blit(l1, 160 - l1.w / 2, 0);
     b.blit(l2, 160 - l2.w / 2, 30);
-    b.blit(l3, 160 - l3.w / 2, 106);
     for (int y = 30; y < 104; y++)
         for (int x = 0; x < 320; x++) {
             uint8_t& p = b.px[size_t(y) * 320 + x];

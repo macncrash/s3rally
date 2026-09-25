@@ -1,4 +1,4 @@
-// S3 RALLY CHAMPIONSHIP - online: the same stage for up to four players,
+// (3) RALLY - online: the same stage for up to four players,
 // starting ten seconds apart like a real rally, over the network protocol the
 // console already speaks (host is the hub; LAN discovery or IP:port).
 

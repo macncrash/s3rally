@@ -1,4 +1,4 @@
-// S3 RALLY CHAMPIONSHIP - the stage: driving, timing, the co-driver,
+// (3) RALLY - the stage: driving, timing, the co-driver,
 // the other crews on the road, and the dust they leave hanging in the air.
 
 #include <algorithm>

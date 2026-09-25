@@ -1,4 +1,4 @@
-// A trailer for S3 RALLY CHAMPIONSHIP, filmed on the console itself: the
+// A trailer for (3) RALLY, filmed on the console itself: the
 // boot logo, the multi-cart menu, a stage start with the co-driver reading the
 // first notes, then cuts across the five rallies in different views. The
 // autopilot drives; the picture and sound go straight to ffmpeg.
@@ -62,7 +62,7 @@ int recordRally(const char* mp4Path) {
     sys->powerOn(*menu);
     film(175);
     film(140);
-    // 2. The Rally Championship title (booted the same way START would).
+    // 2. The (3) Rally title (booted the same way START would).
     sys->bootCart(*champ);
     champ->testProfile("MACNCRASH");
     champ->testAutopilot(true);

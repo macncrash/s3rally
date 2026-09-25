@@ -1,4 +1,4 @@
-// S3 RALLY CHAMPIONSHIP - drawing: the road from the camera, the scenery
+// (3) RALLY - drawing: the road from the camera, the scenery
 // and cars as scaled sprites, the cockpit, the HUD and the menus.
 
 #include <algorithm>

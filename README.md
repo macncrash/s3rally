@@ -9,7 +9,7 @@
 ![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20browser-lightgrey)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-![S3 RALLY CHAMPIONSHIP](https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/rc/trailer.gif)
+![(3) RALLY](https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/rc/trailer.gif)
 
 🎮 **[Play it now in your browser](https://macncrash.github.io/s3garally/)**, with no install.
 
@@ -25,7 +25,7 @@ special: a **hardware sprite scaler** and a **road generator**. Every graphic,
 song, sound and voice line is generated when a cartridge boots. There are no asset
 files. It comes with a multi-cart holding two games.
 
-## S3 RALLY CHAMPIONSHIP
+## (3) RALLY
 
 **Real rallying.** Special stages are driven against the clock, one car at a time,
 cars starting ten seconds apart. It's you, your co-driver, the road and the
@@ -83,7 +83,9 @@ flying off.
 
 ## S3 RUN
 
-The original: a four-stage arcade racer in the OutRun mould. You beat the
+The original: a four-stage arcade racer in the OutRun mould. It also lives on as its own game,
+**[SUNSET CRUISE](https://github.com/macncrash/s3cruise)** ([play](https://macncrash.github.io/s3cruise/)), rethemed as a run up the
+coast from Los Angeles to San Francisco. You beat the
 checkpoint clock through Desert, Forest, Alpine and Lakeside stages, passing a
 pack of fifteen rivals, with two cars, a co-driver and head-to-head races. Both
 games share the radio:
@@ -119,7 +121,7 @@ sudo apt install libsdl2-dev
 
 make
 ./s3              # the multi-cart menu: choose a game
-./s3 --cart rally # straight into S3 RALLY CHAMPIONSHIP (or --cart run)
+./s3 --cart rally # straight into (3) RALLY (or --cart run)
 ```
 
 | | Keyboard | PlayStation | Xbox |
@@ -148,7 +150,7 @@ calls.
 
 ### Online (up to 4 crews, LAN or internet)
 
-In **S3 RALLY CHAMPIONSHIP** choose **ONLINE**. One player chooses **HOST A
+In **(3) RALLY** choose **ONLINE**. One player chooses **HOST A
 STAGE**, and everyone runs that stage, starting ten seconds apart in joining
 order, just like a real rally. You see the others on the road if you catch them
 or they catch you, and the results rank everyone by stage time. In **S3
@@ -175,7 +177,7 @@ you. Set `S3_NET_DEBUG=1` to log the protocol if a game won't connect.
 ### Four players on one screen
 
 ```bash
-./s3 --quad 4                         # 2x2 split screen, Rally Championship: four crews, 10 s apart
+./s3 --quad 4                         # 2x2 split screen, (3) Rally: four crews, 10 s apart
 ./s3 --quad 4 --cart run              # the same for S3 RUN
 ./s3 --record-quad match.mp4 4        # film an autopilot 4-way match (needs ffmpeg)
 ```
@@ -240,7 +242,7 @@ for example `V2.0.0 (a1b2c3d)`. `./s3 --version` prints it too.
 | Link | UDP for LAN and internet play |
 | Multi-cart | pick a game after the boot logo; ESC on a title screen comes back |
 
-The Rally Championship's car is a small 3D model rendered into sprite ROM from
+The (3) Rally's car is a small 3D model rendered into sprite ROM from
 every angle at boot, the way 90s games pre-rendered their cars. That gives 24
 headings, 3 pitches and 2 roll-over sequences, so it can slide, spin and tumble.
 
@@ -248,7 +250,7 @@ Full reference: **[docs/HARDWARE.md](docs/HARDWARE.md)**.
 
 ```
 src/console/   vdp · apu · system (SDL2 board, boot ROM) · gfx (SDK, font ROM) · link (UDP)
-src/rc/        S3 RALLY CHAMPIONSHIP: course (venues, stages, pace notes) · car (physics)
+src/rc/        (3) RALLY: course (venues, stages, pace notes) · car (physics)
                carmodel (3D car sprites) · art · voice (co-driver) · game · drive · render · online
 src/game/      S3 RUN: rally (game, physics, AI, HUD) · stages · art · sound
                shared by both: radio (songs + sequencer) · profile · versus (network sessions)
@@ -266,7 +268,7 @@ src/           main · multicart (the menu) · multi (several consoles in one pr
 ./s3 --versus-test [STAGE] [--players N] [--discover] [--cart run]   # 2-4 consoles race over loopback UDP
 ```
 
-The daily simulation drives all fifteen Rally Championship stages with the three
+The daily simulation drives all fifteen (3) Rally stages with the three
 cars in turn. It reports stage time against a perfect run, top speed, jumps, time
 in the air, hard landings, crashes and damage.
 

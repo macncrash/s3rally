@@ -1,13 +1,13 @@
-// S3-16 with its multi-cart: S3 RALLY CHAMPIONSHIP and S3 RUN.
+// S3-16 with its multi-cart: (3) RALLY and S3 RUN.
 //
 //   s3                 play (window, sound, keyboard or gamepad): pick a game
-//   s3 --cart rally    go straight to S3 RALLY CHAMPIONSHIP (or --cart run)
+//   s3 --cart rally    go straight to (3) RALLY (or --cart run)
 //   s3 --sim           headless: the autopilot drives every stage of both games, prints a report
 //   s3 --sim --cart X  just one game;  --shots D also saves screenshots into directory D
 //   s3 --quad [N]      N consoles (2-4) on one stage over the network, split screen
 //   s3 --record-quad F [N]  film an N-player autopilot match to F.mp4 (needs ffmpeg)
 //   s3 --versus-test [STAGE] [--players N] [--discover]  headless multiplayer test
-//   (these three take --cart run for S3 RUN; the default is S3 RALLY CHAMPIONSHIP)
+//   (these three take --cart run for S3 RUN; the default is (3) RALLY)
 
 #include <algorithm>
 #include <chrono>
@@ -29,14 +29,14 @@
 #include "trailer.h"
 #include "version.h"
 
-// S3 RALLY CHAMPIONSHIP: the autopilot drives all fifteen stages.
+// (3) RALLY: the autopilot drives all fifteen stages.
 static int simulateRally(const char* shotDir) {
     gs::System sys(true);
     auto cart = std::make_unique<rc::RallyChamp>();
     auto t0 = std::chrono::steady_clock::now();
     sys.bootCart(*cart);
     const double bootMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-    std::printf("S3 RALLY CHAMPIONSHIP headless simulation\n");
+    std::printf("(3) RALLY headless simulation\n");
     std::printf("boot %.0f ms, sprite ROM %.2f MB / %d MB, tiles %d / %d\n", bootMs, cart->romUsedMB(), gs::SPRITE_ROM_SIZE >> 20, cart->tilesUsed(),
                 gs::NUM_TILES);
     for (int i = 0; i < 60; i++) sys.step();
@@ -300,7 +300,7 @@ int main(int argc, char** argv) {
             return 0;
         }
         else if (!std::strcmp(argv[i], "--version")) {
-            std::printf("S3-16 MULTI-CART (S3 RALLY CHAMPIONSHIP, S3 RUN) %s\n", S3_VERSION_STRING);
+            std::printf("S3-16 MULTI-CART ((3) RALLY, S3 RUN) %s\n", S3_VERSION_STRING);
             return 0;
         }
         else if (!std::strcmp(argv[i], "--record") && i + 2 < argc) {
