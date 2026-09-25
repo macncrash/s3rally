@@ -43,7 +43,10 @@
   // Keep the browser from scrolling or moving focus on game keys.
   const gameKeys = new Set(['Tab', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Backspace']);
   window.addEventListener('keydown', (e) => { if (gameKeys.has(e.code)) e.preventDefault(); });
+  // ?cart=rally32 (or run, rally) opens that game directly, skipping the multi-cart menu.
+  const wantCart = new URLSearchParams(location.search).get('cart');
   var Module = {
+    arguments: wantCart && /^[a-z0-9]+$/.test(wantCart) ? ['--cart', wantCart] : [],
     canvas,
     print: (t) => console.log(t),
     printErr: (t) => console.warn(t),

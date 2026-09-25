@@ -13,6 +13,8 @@
 
 🎮 **[Play it now in your browser](https://macncrash.github.io/s3garally/)**, with no install.
 
+🧊 **[Play (3) RALLY 32 on the S3-32](https://macncrash.github.io/s3garally/32/)**, the 32-bit version in real 3D.
+
 ▶ **[Watch the trailers](https://macncrash.github.io/s3garally-site/)**
 
 </div>
