@@ -112,6 +112,9 @@ public:
     void demoStart(int stage, View v, int car);  // on the start line, the clock about to run
     void demoTitle() { toTitle(); }
     void testAutopilot(bool on) { autopilot_ = on; }
+    void testAssist(bool on) { assist_ = on; }
+    int crashCount() const { return crashes_; }
+    float testClock() const { return stageTime_ + car_.penalty; }
     int voiceReady() const { return voice_ ? voice_->ready() : 0; }
     bool done() const { return mode_ == Mode::Result || mode_ == Mode::Finish; }
     void setView(View v) { view_ = v; }

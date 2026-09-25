@@ -89,6 +89,7 @@ float Car::engineTorque(float rpmNow) const {
 
 void Car::step(const Course& c, const CarInput& in, float dt, bool manual) {
     ev = CarEvents{};
+    assist_ = in.assist;
     stateT += dt;
     if (state == CarState::Out) {
         u *= 0.95f;
@@ -207,15 +208,23 @@ void Car::driveStep(const Course& c, const CarInput& in, float dt, bool manual) 
     if (ax_ > edge) {
         const uint8_t side = x < 0 ? g.left : g.right;
         if (side == gs::GROUND_SNOWWALL) { gripK *= 0.8f; rollRes += 0.25f; }
-        else if (ax_ < edge + 1.5f) { gripK *= 0.8f; rollRes += 0.04f; }  // loose verge
+        else if (ax_ < edge + 1.5f) { gripK *= 0.9f; rollRes += 0.04f; }  // loose verge
         else { gripK *= 0.6f; rollRes += 0.07f; rough = true; }          // grass, stones, ditch
     }
     const float mu = sf.mu * gripK;
 
     // Steering: faster hands on a keyboard, less lock at speed.
-    const float rate = in.analog ? 12.0f : 4.5f;
+    // Keys are on or off: turn in progressively, let go quickly (self-centring).
+    const bool centring = std::fabs(in.steer) < std::fabs(steerIn) || in.steer * steerIn < 0;
+    const float rate = in.analog ? 12.0f : centring ? 7.0f : 2.6f;
     steerIn += clampf(in.steer - steerIn, -rate * dt, rate * dt);
-    const float lock = cs.steerMax / (1 + std::fabs(u) / 32);
+    float lock = cs.steerMax / (1 + std::fabs(u) / 32);
+    // Steering help (keyboard, or traction help on): full input asks for the tightest turn the tyres
+    // can actually hold at this speed, not full lock, so a held key never spins the car.
+    if ((!in.analog || in.assist) && std::fabs(u) > 6) {
+        const float useful = (cs.a + cs.b) * mu * GRAV * 1.05f / (u * u) + sf.peak * 0.9f;
+        lock = std::min(lock, useful);
+    }
     float pull = 0;
     if (damage.suspension > 0.2f) pull += (damage.suspension - 0.2f) * 0.06f;
     if (damage.puncture) pull += 0.03f * damage.puncture;
@@ -286,6 +295,12 @@ void Car::driveStep(const Course& c, const CarInput& in, float dt, bool manual) 
     float du = fx / m + v * r;
     float dv = fy / m - u * r;
     float dr = mz / cs.inertia;
+    // Stability help: when the car yaws much faster than the steering asks, damp it (a spin caught early).
+    if (in.assist && std::fabs(u) > 5) {
+        const float rKin = u * std::tan(steerAngle) / L;
+        const float excess = r - rKin;
+        if (std::fabs(excess) > 0.15f) dr -= 3.5f * (excess - (excess > 0 ? 0.15f : -0.15f));
+    }
     // At walking pace the tyre model gets stiff: blend to plain kinematics.
     const float slowK = clampf((std::fabs(u) - 1.0f) / 3.0f, 0, 1);
     u += du * dt;
@@ -451,7 +466,7 @@ void Car::collide(const Course& c, float dt) {
             }
             // Something solid: a tree, a wall, a boulder.
             ev.hit = spd;
-            if (spd > 17) {
+            if (spd > 22) {
                 startRoll(spd, x < o.off ? -1 : 1, o.type == O_STONEWALL ? "HIT A WALL" : "BIG CRASH");
             } else {
                 damage.body = std::min(1.0f, damage.body + spd * 0.02f);
@@ -477,6 +492,14 @@ void Car::edges(const Course& c, float dt) {
     const uint8_t side = x < 0 ? g.left : g.right;
     const float lat = u * std::sin(psi) + v * std::cos(psi);  // speed across the road
     const float out = sgn(x) * lat;                           // positive: heading further off
+    // Driving help: the soft ground beyond the edge soaks up speed heading away from the road.
+    if (assist_ && out > 0 && over > 0.5f && side != gs::GROUND_SNOWWALL) {
+        const float k = std::min(1.0f, dt * 2.5f * std::min(1.0f, over / 2));
+        const float cut = out * k;
+        const float c0 = std::cos(psi), s0 = std::sin(psi);
+        u -= sgn(x) * cut * s0;
+        v -= sgn(x) * cut * c0;
+    }
     if (side == gs::GROUND_SNOWWALL && over > 0.5f) {
         // Snow banks: lean on them, they push you back, they cost you speed.
         x = sgn(x) * (g.hw + 0.5f);

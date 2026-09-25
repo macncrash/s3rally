@@ -38,7 +38,7 @@ const ObjInfo OBJ[O_COUNT] = {
     /* BALE        */ {1.1f, 0.8f, 1, true, false},
     /* OLIVE       */ {4.5f, 0.35f, 2, true, true},
     /* GUM         */ {12.0f, 0.4f, 2, true, true},
-    /* STONEWALL   */ {1.0f, 1.6f, 2, false, true},
+    /* STONEWALL   */ {1.0f, 0.3f, 2, false, true},  // thin: it runs along the road
     /* SPECTATORS  */ {1.9f, 0.0f, 0, false, false},
     /* MARSHAL     */ {1.9f, 0.0f, 0, false, false},
     /* BOARD_START */ {3.2f, 0.0f, 0, false, false},
@@ -702,8 +702,8 @@ Course buildCourse(int stage) {
         const float r = rnd();
         switch (c.venue) {
             case 0:  // Finland: pine and birch forest close to the road
-                if (i % 4 == 0) put(i, O_PINE, -(e + rnd.range(3, 6)), rnd() < 0.5f);
-                if (i % 4 == 2) put(i, O_PINE, e + rnd.range(3, 6), rnd() < 0.5f);
+                if (i % 4 == 0) put(i, O_PINE, -(e + rnd.range(5, 8)), rnd() < 0.5f);
+                if (i % 4 == 2) put(i, O_PINE, e + rnd.range(5, 8), rnd() < 0.5f);
                 if (i % 5 == 1) put(i, rnd() < 0.5f ? O_BIRCH : O_PINE, side() * (e + rnd.range(6, 16)), rnd() < 0.5f);
                 if (r < 0.03f) put(i, O_ROCK, side() * (e + rnd.range(0.8f, 2.5f)));
                 if (r > 0.992f) put(i, O_LOGS, side() * (e + rnd.range(2, 4)));

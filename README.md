@@ -73,7 +73,7 @@ flying off.
 - **Modes:** the Championship (all five rallies), a single rally, Time Attack
   against your own ghost, and **Online** for up to four crews. There are three
   levels (AMATEUR, PRO, LEGEND) and three cars, including a rear-drive legend
-  that is a handful. Traction help is optional.
+  that is a handful. **Driving help** is on by default: a held arrow key asks for the tightest turn the tyres can hold (never a spin-inducing full lock), spins are damped early, wheelspin is limited, and the soft ground past the edge scrubs off speed before you reach the trees. Turn it off on the car screen for the raw car.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/rc/finland.png" width="32%"> <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/rc/norway-night.png" width="32%"> <img src="https://raw.githubusercontent.com/macncrash/s3garally-site/main/media/rc/australia-dusk.png" width="32%"><br>
