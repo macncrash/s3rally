@@ -180,6 +180,7 @@ void Rally32::loadStage(int st) {
     car_.reset(course_, course_.startSeg, carId_);
     time_ = 0;
     camYaw_ = headingAt(car_.s);
+    camRel_ = 0;
     camY_ = car_.y + 2;
 }
 
@@ -322,16 +323,17 @@ void Rally32::frame(gs::System& sys) {
 
 // The chase camera follows the car every frame (drawing only looks through it).
 void Rally32::follow() {
-    const float carH = headingAt(car_.s) + car_.psi;
-    float travel = carH;
-    if (car_.speed() > 3)
-        travel = headingAt(car_.s) + std::atan2(car_.u * std::sin(car_.psi) + car_.v * std::cos(car_.psi), std::max(0.5f, car_.along()));
-    float d = travel - camYaw_;
-    while (d > PI) d -= 2 * PI;
-    while (d < -PI) d += 2 * PI;
-    camYaw_ += d * 0.1f;
-    const float groundBehind = roadPoint(car_.s - 6.4f, car_.x).y;
-    camY_ += (std::max(groundBehind + 2.5f, car_.y + 2.0f) - camY_) * 0.12f;
+    // The chase camera works as on the 16-bit machine: it turns with the road straight away, and
+    // follows the direction of travel only part of the way (at most 0.7 rad off the road), so in a
+    // slide you see the car go sideways and can judge the counter-steer, instead of the world
+    // swinging round a car that always looks straight.
+    float want = car_.psi;
+    if (car_.speed() > 3 && car_.state == rc::CarState::Driving)
+        want = std::atan2(car_.u * std::sin(car_.psi) + car_.v * std::cos(car_.psi), std::max(0.5f, car_.along()));
+    camRel_ += (clampf(want, -0.7f, 0.7f) - camRel_) * 0.12f;
+    camYaw_ = headingAt(car_.s) + camRel_;
+    const float groundBehind = roadPoint(car_.s - 5.8f, car_.x).y;
+    camY_ += (std::max(groundBehind + 2.1f, car_.y + 1.8f) - camY_) * 0.12f;
 }
 
 bool Rally32::video(const uint32_t*& px, int& w, int& h) {
@@ -362,13 +364,13 @@ void Rally32::scene() {
         cam_.roll = car_.roll * 0.6f;
         cam_.focal = 190;
     } else {
-        const float dist = view_ == 2 ? 9.5f : 6.4f;
+        const float dist = view_ == 2 ? 9.5f : 5.8f;  // closer and wider than it was: corners come into view sooner
         cam_.pos = carPos - back * dist;
         cam_.pos.y = camY_ + (view_ == 2 ? 1.4f : 0);
         cam_.yaw = camYaw_;
-        cam_.pitch = view_ == 2 ? -0.2f : -0.15f;
+        cam_.pitch = view_ == 2 ? -0.2f : -0.12f;
         cam_.roll = 0;
-        cam_.focal = 250;
+        cam_.focal = view_ == 2 ? 230.0f : 200.0f;  // about 77 degrees across, near the 16-bit view's 80
     }
     cam_.fogNear = V.fogNear * 0.6f;
     cam_.fogFar = std::min(V.fogFar, 320.0f);

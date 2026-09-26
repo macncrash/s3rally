@@ -1,6 +1,6 @@
 // S3 RALLY - the in-car radio.
 //
-// Four stations, each playing a rotation of original songs, plus YOUR MUSIC
+// Five stations, each playing a rotation of original songs, plus YOUR MUSIC
 // (the player's own files). Stations keep
 // "broadcasting" while you're tuned elsewhere, so flipping back lands you
 // mid-song, like a real radio. Songs are written in a small tracker
@@ -20,7 +20,7 @@
 
 namespace rally {
 
-constexpr int NUM_STATIONS = 4;   // built-in stations
+constexpr int NUM_STATIONS = 5;   // built-in stations
 constexpr int USER_STATION = NUM_STATIONS;  // "YOUR MUSIC", present when the music folder has tracks
 
 // Songs from the player's own music folder, loaded (and converted if needed)
@@ -71,6 +71,7 @@ struct Song {
     float bpm = 120;
     int stepsPerBeat = 4;
     float echoTime = 0.3f, echoFb = 0.3f, echoWet = 0.25f;
+    float pump = 0;  // sidechain: how far the music ducks on each kick (0 = none), as in French house
     std::vector<SongTrack> tracks;
     std::vector<std::string> drums;  // one token per step
     int steps = 0;
@@ -123,6 +124,7 @@ private:
     double timer_ = 0;
     int gap_ = 0, static_ = 0, card_ = 0;
     bool ducked_ = false;
+    int pumpT_ = 1000;  // frames since the last kick, for the sidechain
     struct Live {
         float cur = 0;
         char chord = 0;
