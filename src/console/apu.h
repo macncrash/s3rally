@@ -76,6 +76,7 @@ public:
     void setPcmGain(int ch, float gain);
     void setEcho(float seconds, float feedback, float wet);
     void setMaster(float v);
+    void setHostTrim(float v);  // the console's own volume setting, after setMaster
     void silence();
 
 private:
@@ -122,6 +123,7 @@ private:
     size_t echoPos_ = 0, echoLen_ = 1;
     float echoFb_ = 0.35f, echoWet_ = 0.3f;
     float master_ = 0.8f;
+    float hostTrim_ = 1;
     float lp_[2] = {0, 0};
     float dcIn_[2] = {0, 0}, dcOut_[2] = {0, 0};
 };

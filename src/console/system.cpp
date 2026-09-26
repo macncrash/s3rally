@@ -11,10 +11,6 @@
 #include <sstream>
 #include <vector>
 
-#if defined(__APPLE__)
-#include <mach/mach.h>
-#endif
-
 #include "gfx.h"
 
 #ifdef __EMSCRIPTEN__
@@ -64,6 +60,7 @@ System::System(bool hl) : headless(hl) {
         SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5_RUMBLE, "1");
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0)
             std::fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
+        loadHostConfig();
     }
 }
 
@@ -162,8 +159,7 @@ void System::step() {
         }
     }
     if (reel.left > 0 && reel.video && reel.audio) {
-        // Draw the S3-16 buffer here. System::render() asks the cartridge for its own
-        // picture, and a binary built before that hook existed has no slot for the call.
+        // Reels are S3-16 pictures (320x224): film the VDP's buffer.
         vdp.render(fb);
         std::fwrite(fb, 4, size_t(SCREEN_W * SCREEN_H), reel.video);
         float samples[800 * 2];
@@ -175,42 +171,11 @@ void System::step() {
     }
 }
 
-namespace {
-
-// video() is the virtual after frame(). A cartridge built before that hook has
-// no slot; the bytes there are the next typeinfo record, and calling them faults.
-bool videoSlotIsCode(Cart* cart) {
-#if defined(__APPLE__)
-    if (!cart) return false;
-    auto** vt = *reinterpret_cast<void***>(cart);
-    void* slot = vt ? vt[5] : nullptr;
-    if (!slot) return false;
-    vm_address_t addr = reinterpret_cast<vm_address_t>(slot);
-    vm_size_t size = 0;
-    vm_region_basic_info_data_64_t info{};
-    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
-    mach_port_t object = MACH_PORT_NULL;
-    const vm_address_t asked = addr;
-    if (vm_region_64(mach_task_self(), &addr, &size, VM_REGION_BASIC_INFO_64,
-                     reinterpret_cast<vm_region_info_t>(&info), &count, &object) != KERN_SUCCESS)
-        return false;
-    if (addr > asked || asked >= addr + size) return false;
-    return (info.protection & VM_PROT_EXECUTE) != 0;
-#else
-    (void)cart;
-    return true;
-#endif
-}
-
-}  // namespace
-
 void System::render() {
-    if (!inBios_ && cart_ && videoSlotIsCode(cart_)) {
-        const uint32_t* px = nullptr;
-        int w = 0, h = 0;
-        using VideoFn = bool (*)(Cart*, const uint32_t*&, int&, int&);
-        auto** vt = *reinterpret_cast<void***>(cart_);
-        if (reinterpret_cast<VideoFn>(vt[5])(cart_, px, w, h) && px && w > 0 && h > 0) {
+    const uint32_t* px = nullptr;
+    int w = 0, h = 0;
+    if (!inBios_ && cart_) {
+        if (cart_->video(px, w, h) && px && w > 0 && h > 0) {
             shown = px;
             shownW = w;
             shownH = h;
@@ -308,6 +273,7 @@ int System::run(Cart& cart) {
         std::fprintf(stderr, "SDL window: %s\n", SDL_GetError());
         return 1;
     }
+    if (hostFull_) SDL_SetWindowFullscreen(win_, SDL_WINDOW_FULLSCREEN_DESKTOP);
     ren_ = SDL_CreateRenderer(win_, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     vsync_ = ren_ != nullptr;
     if (!ren_) ren_ = SDL_CreateRenderer(win_, -1, 0);
@@ -436,7 +402,7 @@ void System::pollEvents() {
 // normal board and the four-console quad mode.
 void System::readController(_SDL_GameController* ctl_, Controller& ctl, Pad& pad, bool trigWas_[2]) {
     std::fill(std::begin(pad.padBtn), std::end(pad.padBtn), false);
-    pad.axisX = pad.accel = pad.brake = 0;
+    pad.axisX = pad.axisY = pad.accel = pad.brake = 0;
     ctl.anyDown = false;
     if (!ctl_) return;
     const float ax = SDL_GameControllerGetAxis(ctl_, SDL_CONTROLLER_AXIS_LEFTX) / 32767.0f;
@@ -457,6 +423,8 @@ void System::readController(_SDL_GameController* ctl_, Controller& ctl, Pad& pad
     for (int i = 0; i < PHYS_COUNT; i++) ctl.anyDown |= phys[i];
     // Stick steering and directions are fixed; everything else goes through the map.
     if (std::fabs(ax) > 0.12f) pad.axisX = std::clamp((ax - std::copysign(0.12f, ax)) / 0.88f, -1.0f, 1.0f);
+    // SDL's Y axis is positive downward; axisY is + up (stick back, for flight games, reads negative).
+    if (std::fabs(ay) > 0.12f) pad.axisY = -std::clamp((ay - std::copysign(0.12f, ay)) / 0.88f, -1.0f, 1.0f);
     pad.padBtn[BTN_UP] = ay < -0.5f;
     pad.padBtn[BTN_DOWN] = ay > 0.5f;
     pad.padBtn[BTN_LEFT] = ax < -0.5f;
@@ -634,7 +602,42 @@ void System::biosInit() {
     vdp.HUD.clear();
 }
 
+// The s3 launcher keeps the console's settings in console.cfg: volume level, CRT
+// scanlines and fullscreen. S3_MASTER, S3_CRT and S3_FULLSCREEN override it.
+void System::loadHostConfig() {
+#ifndef __EMSCRIPTEN__
+    float master = -1;
+    int crtBit = -1, fullBit = -1;
+    if (const char* home = std::getenv("HOME"); home && home[0]) {
+#if defined(__APPLE__)
+        const std::string path = std::string(home) + "/Library/Application Support/s3/console/console.cfg";
+#else
+        const char* xdg = std::getenv("XDG_CONFIG_HOME");
+        const std::string path = (xdg && xdg[0] ? std::string(xdg) : std::string(home) + "/.config") + "/s3/console.cfg";
+#endif
+        std::ifstream in(path);
+        std::string line;
+        while (std::getline(in, line)) {
+            const auto eq = line.find('=');
+            if (line.empty() || line[0] == '#' || eq == std::string::npos) continue;
+            const std::string key = line.substr(0, eq), val = line.substr(eq + 1);
+            if (key == "level") master = std::clamp(std::atoi(val.c_str()), 0, 10) / 10.0f;
+            else if (key == "master") master = std::clamp(float(std::atof(val.c_str())), 0.0f, 1.0f);
+            else if (key == "crt" && !val.empty()) crtBit = val[0] == '1';
+            else if (key == "full" && !val.empty()) fullBit = val[0] == '1';
+        }
+    }
+    if (const char* e = std::getenv("S3_MASTER")) master = std::clamp(float(std::atof(e)), 0.0f, 1.0f);
+    if (const char* e = std::getenv("S3_CRT")) crtBit = e[0] == '1';
+    if (const char* e = std::getenv("S3_FULLSCREEN")) fullBit = e[0] == '1';
+    if (master >= 0) apu.setHostTrim(master);
+    if (crtBit >= 0) crt = crtBit != 0;
+    if (fullBit >= 0) hostFull_ = fullBit != 0;
+#endif
+}
+
 void System::setFullscreen(bool on) {
+    hostFull_ = on;
     if (!win_) return;
     SDL_SetWindowFullscreen(win_, on ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
 }
