@@ -55,7 +55,9 @@ S3_VERIFIER=$PWD/../s3 S3_ADMIN_TOKEN=$(openssl rand -hex 20) target/release/s3-
 | `S3_CORS_ORIGINS` | none | Web pages that may call the API, comma-separated: the browser build's page |
 | `S3_GITHUB_REPO`, `S3_GITHUB_TOKEN` | none | Feedback also opens an issue in `owner/repo`. Use a fine-grained token with only issues access to that one repository |
 
-Games point at the server with `S3_SCORE_URL` or a `score_url=` line in the console settings (`console.cfg`). A game accepts only `https://`, or `http://` to this machine. With no server set, the online features are simply absent.
+Games use `https://s3.cyberducky.ai` unless `S3_SCORE_URL` or a `score_url=` line in the console settings (`console.cfg`) says otherwise; `score_url=off` turns the online features off. A game accepts only `https://`, or `http://` to this machine.
+
+**Certificate pinning.** The desktop console pins that server's public keys (`PINS` in `src/console/score.cpp`, passed to curl as `--pinnedpubkey`): the key served now and a backup kept offline for rotation. Any other key is refused, even with a valid certificate. The server reuses its key across certificate renewals. To rotate, switch the server to the backup key; to add a new backup, ship its pin before it is needed. Browsers can't pin; the web build relies on normal certificate checks.
 
 **Adding a game:** add a line to `games.txt`. Points games, or games without a verifier yet, use `review`.
 
