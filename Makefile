@@ -6,7 +6,7 @@ SDL_CFLAGS := $(shell $(SDL2_CONFIG) --cflags)
 SDL_LIBS   := $(shell $(SDL2_CONFIG) --libs)
 BUILD_ID   := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 CXXFLAGS ?= -O2 -g
-CXXFLAGS += -std=c++17 -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -MMD -MP $(SDL_CFLAGS) -Isrc -DS3_BUILD='"$(BUILD_ID)"'
+CXXFLAGS += -pthread -std=c++17 -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -MMD -MP $(SDL_CFLAGS) -Isrc -DS3_BUILD='"$(BUILD_ID)"'
 SRC := $(wildcard src/console/*.cpp src/game/*.cpp src/rc/*.cpp src/g32/*.cpp src/rc32/*.cpp src/*.cpp)
 OBJ := $(SRC:src/%.cpp=build/%.o)
 
@@ -37,6 +37,8 @@ web:
 		-sENVIRONMENT=web --shell-file web/shell.html $(SRC) -o build-web/index.html
 	mkdir -p build-web/32
 	printf '<!doctype html><meta http-equiv="refresh" content="0; url=../?cart=rally32"><a href="../?cart=rally32">(3) RALLY 32</a>\n' > build-web/32/index.html
+	mkdir -p build-web/64
+	printf '<!doctype html><meta http-equiv="refresh" content="0; url=../?cart=rally64"><a href="../?cart=rally64">(3) RALLY 64</a>\n' > build-web/64/index.html
 
 clean:
 	rm -rf build build-web s3

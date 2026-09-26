@@ -1,24 +1,33 @@
-// S3-32 video hardware: a polygon GPU in the style of the mid-90s machines.
+// S3 video hardware: a polygon GPU in two models.
 //
-// 320x240, 15-bit colour. The cartridge submits triangles, quads and sprites
-// with a depth; the GPU keeps them in an ordering table and draws back to front
-// (there is no depth buffer). Textures are 16-bit texels in 2 MB of texture RAM,
-// mapped affinely (so they swim a little, as they did), modulated by a
-// Gouraud-shaded colour (128 = unchanged), fogged towards a fog colour, and
-// blended opaque, half-transparent or additive. Shaded pixels are dithered
-// down to 15 bits.
+// S3-32, in the style of the mid-90s machines: 320x240, 15-bit colour. The
+// cartridge submits triangles, quads and sprites with a depth; the GPU keeps
+// them in an ordering table and draws back to front (there is no depth
+// buffer). Textures are 16-bit texels in 2 MB of texture RAM, mapped affinely
+// (so they swim a little, as they did), modulated by a Gouraud-shaded colour
+// (128 = unchanged), fogged towards a fog colour, and blended opaque,
+// half-transparent or additive. Shaded pixels are dithered down to 15 bits.
+//
+// S3-64, the next board, runs the same command stream and fixes what the
+// 32-bit machine faked: 640x480 in 24-bit colour, a per-pixel depth buffer,
+// perspective-correct texturing, bilinear filtering and mipmaps, in 8 MB of
+// texture RAM. It draws the screen in horizontal bands on parallel pipelines.
+// Cartridges keep working in 320x240 coordinates; the 64 scales them up.
 #pragma once
 #include <cstdint>
 #include <vector>
 
 namespace g32 {
 
-constexpr int W = 320, H = 240;
-constexpr int TEX_RAM = 2 << 20;  // bytes
+constexpr int W = 320, H = 240;   // the coordinate space cartridges draw in
+constexpr int TEX_RAM = 2 << 20;  // bytes, S3-32
+constexpr int TEX_RAM_64 = 8 << 20;
+
+enum class Model { S3_32, S3_64 };
 
 // Texel: bit 15 set = visible, then 5-5-5 RGB. 0 is transparent.
 inline uint16_t texel(int r5, int g5, int b5) { return uint16_t(0x8000 | (r5 & 31) << 10 | (g5 & 31) << 5 | (b5 & 31)); }
-inline uint16_t texelFrom12(uint16_t rgb4) {  // a S3-16 colour
+inline uint16_t texelFrom12(uint16_t rgb4) {  // an S3-16 colour
     const int r = (rgb4 >> 8) & 15, g = (rgb4 >> 4) & 15, b = rgb4 & 15;
     return texel(r * 2 + (r >> 3), g * 2 + (g >> 3), b * 2 + (b >> 3));
 }
@@ -26,15 +35,20 @@ inline uint16_t texelFrom12(uint16_t rgb4) {  // a S3-16 colour
 enum Blend : uint8_t { OPAQUE, HALF, ADD };
 
 struct Vtx {
-    float x = 0, y = 0;             // screen position
+    float x = 0, y = 0;             // screen position (320x240 space)
     float u = 0, v = 0;             // texture coordinates, in texels
     uint8_t r = 128, g = 128, b = 128;  // shade: 128 leaves the texture as it is
     float fog = 0;                  // 0 clear .. 1 fully fog
+    float z = 0;                    // view depth in metres; 0 = flat on the screen (HUD)
 };
 
 class GPU {
 public:
-    GPU();
+    explicit GPU(Model model = Model::S3_32);
+    Model model() const { return model_; }
+    int width() const { return fbW_; }   // the picture it outputs
+    int height() const { return fbH_; }
+
     // Texture RAM. Wrap-around textures must be a power of two in each direction.
     int texture(int w, int h, const uint16_t* texels);
     void release(int from);  // free textures from this id on (a new stage's set replaces the last)
@@ -63,6 +77,7 @@ private:
         int w, h;
         size_t off;
         bool pow2;
+        int levels = 1;  // mipmaps (S3-64): each level follows the one before in texture RAM
     };
     struct Prim {
         Vtx v[3];
@@ -71,13 +86,18 @@ private:
         Blend blend;
         uint32_t order;
     };
-    void raster(const Prim& p);
+    void raster(const Prim& p);                     // S3-32
+    void raster64(const Prim& p, int y0, int y1);   // S3-64, rows [y0, y1)
+    void drawBand64(int y0, int y1);
 
+    Model model_;
+    int fbW_, fbH_, scale_;
     std::vector<uint16_t> ram_;
     size_t used_ = 0;
     std::vector<Tex> tex_;
     std::vector<Prim> prims_;
-    std::vector<uint16_t> fb_;
+    std::vector<uint16_t> fb_;    // S3-32: 15-bit
+    std::vector<float> zb_;       // S3-64: 1/z per pixel (0 = nothing yet)
     std::vector<uint32_t> out_;
     int fogR_ = 16, fogG_ = 16, fogB_ = 16;
     uint32_t order_ = 0;

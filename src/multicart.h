@@ -25,4 +25,5 @@ private:
     std::unique_ptr<rc::RallyChamp> champ_;
     std::unique_ptr<rally::Rally> run_;
     std::unique_ptr<rc32::Rally32> r32_;
+    std::unique_ptr<rc32::Rally32> r64_;
 };

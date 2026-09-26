@@ -2,7 +2,7 @@
 // stamps S3_BUILD with the git commit so every binary is traceable.
 #pragma once
 
-#define S3_VERSION "2.0.0"
+#define S3_VERSION "2.1.0"
 #ifndef S3_BUILD
 #define S3_BUILD "dev"
 #endif

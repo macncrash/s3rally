@@ -96,6 +96,7 @@ public:
     void rumble(float low, float high, int ms);
     void setLight(int r, int g, int b);
     void quit() { quit_ = true; }
+    void setFullscreen(bool on);
     // A multi-cart menu the games can hand back to (ESC on a title screen).
     void setHome(Cart& home) { home_ = &home; }
     bool hasHome() const { return home_ != nullptr && home_ != cart_; }

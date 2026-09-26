@@ -22,13 +22,17 @@ namespace rc32 {
 
 class Rally32 : public gs::Cart {
 public:
-    const char* title() const override { return "(3) RALLY 32"; }
+    explicit Rally32(g32::Model model = g32::Model::S3_32) : gpu_(model) {}
+    const char* title() const override { return is64() ? "(3) RALLY 64" : "(3) RALLY 32"; }
+    bool is64() const { return gpu_.model() == g32::Model::S3_64; }
     void init(gs::System& sys) override;
     void frame(gs::System& sys) override;
     bool video(const uint32_t*& px, int& w, int& h) override;
 
     // Headless: drive a stage with the autopilot; returns the stage time (0 if it didn't finish).
     float simulate(int stage, int frames, std::vector<std::string>* shots, const std::string& dir);
+    // Headless: median milliseconds per frame (logic + render) while driving stage 0.
+    double benchmark(int frames);
     int lastTriangles() const { return gpu_.lastPrimitives(); }
     void setView(int v) { view_ = v; }
     size_t textureBytes() const { return gpu_.texBytes(); }
