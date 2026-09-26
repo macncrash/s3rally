@@ -40,6 +40,20 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
       - run: cd server && cargo test
       - run: ./tools/score-test.sh
+      - run: docker build -f server/Dockerfile --build-arg BUILD_ID=${GITHUB_SHA::7} -t s3-scores:ci .
+      - name: the image serves and its verifier runs
+        run: |
+          docker run -d --name s3 --read-only --tmpfs /tmp --cap-drop ALL -p 127.0.0.1:18790:8790 s3-scores:ci
+          for i in $(seq 30); do curl -fs http://127.0.0.1:18790/healthz && break; sleep 1; done
+          curl -fs http://127.0.0.1:18790/v1/stats | grep -q '"game":"rally"'
+          # A replay recorded by this build, checked by the image's verifier (a different compiler):
+          # accepted, or at worst review for last-bit float differences; never rejected.
+          ./s3 --write-replay 0 /tmp/r.bin
+          set +e
+          docker run --rm -v /tmp/r.bin:/r.bin:ro s3-scores:ci /app/s3 --verify-run /r.bin
+          code=$?
+          set -e
+          test $code -le 1
 
   web:
     runs-on: ubuntu-latest
