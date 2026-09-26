@@ -60,7 +60,7 @@ private:
     uint16_t livery_[16] = {};
 
     Mode mode_ = Mode::Title;
-    int t_ = 0, stage_ = -1, pick_ = 0, carId_ = 1;
+    int t_ = 0, stage_ = -1, pick_ = 0, carId_ = 0;  // the forgiving 4WD first, as on the 16-bit
     bool attract_ = true;
     rc::Course course_;
     rc::Car car_;
@@ -69,6 +69,7 @@ private:
     float time_ = 0, best_ = 0;
     g32::Camera cam_;
     float camYaw_ = 0, camY_ = 0;
+    float camRel_ = 0;  // chase camera heading relative to the road (as the 16-bit machine does it)
     int view_ = 0;  // 0 chase, 1 cockpit, 2 far chase (V or Z)
     void cockpitHud();
 };

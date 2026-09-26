@@ -335,6 +335,10 @@ struct Builder {
         song.echoWet = wet;
         return *this;
     }
+    Builder& pump(float depth) {
+        song.pump = depth;
+        return *this;
+    }
     Builder& track(const char* name, const gs::FMPatch& p, float pan) {
         song.tracks.push_back({name, p, pan, {}});
         return *this;
@@ -712,15 +716,146 @@ Song launchWindow() {  // synth-brass arena anthem, A minor
 
 }  // namespace
 
+// ------------------------------------------------------------ French house
+// Filtered-disco sounds: a rubbery bass, chopped chord stabs, a scratchy disco
+// guitar and a talk-box lead that bends into its notes. The songs pump: every
+// kick ducks the music, which swells back before the next (Song::pump).
+
+gs::FMPatch houseBass() {  // round and punchy, a little overdriven
+    gs::FMPatch p;
+    p.alg = 4;
+    p.fb = 0.25f;
+    p.op[0] = {1, 0.55f, 0.001f, 0.12f, 0.1f, 0.05f};
+    p.op[1] = {1, 1.0f, 0.001f, 0.22f, 0.55f, 0.05f};
+    p.op[2] = {0.5f, 0.3f, 0.001f, 0.15f, 0.2f, 0.05f};
+    p.op[3] = {1, 0.6f, 0.001f, 0.22f, 0.55f, 0.05f};
+    p.drive = 0.9f;
+    p.tone = 1600;
+    p.vol = 0.19f;
+    p.glide = 1;
+    return p;
+}
+
+gs::FMPatch discoStab() {  // the chopped "sample": bright chords that stop short
+    gs::FMPatch p;
+    p.alg = 7;
+    p.fb = 0.45f;
+    const float det[4] = {0, 1.4f, -1.1f, 2.3f};
+    for (int i = 0; i < 4; i++) p.op[i] = {1, 0.3f, 0.002f, 0.16f, 0.25f, 0.08f, det[i]};
+    p.drive = 1.2f;
+    p.tone = 4200;
+    p.vol = 0.085f;
+    p.glide = 1;
+    p.echo = 0.18f;
+    return p;
+}
+
+gs::FMPatch discoGuitar() {  // funky single-note scratches, wah-ish
+    gs::FMPatch p;
+    p.alg = 4;
+    p.fb = 0.6f;
+    p.op[0] = {3, 0.6f, 0.001f, 0.05f, 0.0f, 0.04f};
+    p.op[1] = {1, 1.0f, 0.001f, 0.12f, 0.1f, 0.04f};
+    p.op[2] = {2, 0.3f, 0.001f, 0.06f, 0.0f, 0.04f};
+    p.op[3] = {1, 0.45f, 0.001f, 0.1f, 0.1f, 0.04f};
+    p.tone = 3200;
+    p.vol = 0.07f;
+    p.glide = 1;
+    p.echo = 0.12f;
+    return p;
+}
+
+gs::FMPatch talkBox() {  // a robot voice: bright formants, vibrato, slides between notes
+    gs::FMPatch p;
+    p.alg = 1;
+    p.fb = 0.55f;
+    p.op[0] = {2, 0.45f, 0.02f, 0.3f, 0.7f, 0.12f};
+    p.op[1] = {3, 0.35f, 0.02f, 0.3f, 0.6f, 0.12f};
+    p.op[2] = {1, 0.7f, 0.01f, 0.3f, 0.8f, 0.12f};
+    p.op[3] = {1, 1.0f, 0.01f, 0.4f, 0.85f, 0.15f};
+    p.vibRate = 5.5f;
+    p.vibDepth = 0.006f;
+    p.vibDelay = 0.18f;
+    p.drive = 1.4f;
+    p.tone = 3800;
+    p.glide = 0.0025f;
+    p.echo = 0.3f;
+    p.vol = 0.085f;
+    return p;
+}
+
+Song oneMoreLap() {  // filter disco, F# minor, 122 BPM
+    Builder b("ONE MORE LAP", "LES PILOTES", 122, 4);
+    b.echo(0.369f, 0.38f, 0.28f).pump(0.55f)
+        .track("bass", houseBass(), 0)
+        .track("stab", discoStab(), 0.2f)
+        .track("gtr", discoGuitar(), -0.45f)
+        .track("lead", talkBox(), 0.05f);
+    // F#m - E - D - E, a bar each: the loop never resolves, so it can run all night.
+    const std::string bass = "F#1 . F#2 . . F#1 F#2 . F#1 . F#2 . A2 . G#2 . | E1 . E2 . . E1 E2 . E1 . E2 . G#2 . E2 . |"
+                             "D1 . D2 . . D1 D2 . D1 . D2 . F#2 . E2 . | E1 . E2 . . E1 E2 . E1 . E2 . B1 . C#2 .";
+    const std::string stab = ". . F#4:m . . . F#4:m . . F#4:m . . F#4:m . . . | . . E4:M . . . E4:M . . E4:M . . E4:M . . . |"
+                             ". . D4:M . . . D4:M . . D4:M . . D4:M . . . | . . E4:M . . . E4:M . . E4:M . . B3:m . . .";
+    const std::string gtr = rep(". C#5 . C#5 . C#5 . A4 . C#5 . C#5 . C#5 . E5", 1) + rep(". B4 . B4 . B4 . G#4 . B4 . B4 . B4 . E5", 1) +
+                            rep(". A4 . A4 . A4 . F#4 . A4 . A4 . A4 . D5", 1) + rep(". B4 . B4 . B4 . G#4 . B4 . B4 . B4 . E5", 1);
+    const std::string four = "K . O . KP . O . K . O . KP . O .";
+    const std::string build = "K . . . K . . . K . . . K . . . | K . . . K . . . K . . . K . K . | K . H . K . H . K . H . K . H . |"
+                              "K . H . KP . H . K . H . KP . P P";
+    b.section("intro", {{"bass", bass}, {"drums", build}});
+    b.section("groove", {{"bass", bass}, {"stab", stab}, {"drums", "KC . O . KP . O . K . O . KP . O . | " + rep(four, 3)}});
+    b.section("hook", {{"bass", bass}, {"stab", stab}, {"gtr", gtr}, {"drums", rep(four, 3) + " K . O . KP . O . K . KP . KP KP KP KP"},
+                       {"lead", "C#5/E5 - - - - - C#5 - B4 - A4 - - - F#4 - | E4/G#4 - - - - - B4 - - - G#4 - E4 - - - |"
+                                "F#4/A4 - - - - - F#4 - A4 - B4 - D5 - - - | B4/C#5 - - - - - - - - - - - . . . ."}});
+    b.section("hook2", {{"bass", bass}, {"stab", stab}, {"gtr", gtr}, {"drums", "KC . O . KP . O . K . O . KP . O . | " + rep(four, 3)},
+                        {"lead", "F#5 - - - E5 - C#5 - E5 - - - F#5 - A5 - | G#5/B5 - - - - - G#5 - E5 - - - B4 - - - |"
+                                 "A5 - - - F#5 - D5 - F#5 - - - A5 - F#5 - | E5/G#5 - - - - - - - E5 - C#5 - B4 - - -"}});
+    // The breakdown: bass and kick drop out, the chords ring, then everything slams back.
+    b.section("break", {{"stab", hold("F#4:m", 16) + hold("E4:M", 16) + hold("D4:M", 16) + hold("E4:M", 16)},
+                        {"lead", hold("C#5/E5", 16) + hold("B4", 16) + hold("A4/F#4", 16) + "G#4 - - - - - - - B4 - - - C#5 - - -"},
+                        {"drums", rep(".", 48) + "P . . . P . . . P . P . P P P P"}});
+    b.section("outro", {{"bass", bass}, {"stab", stab}, {"drums", rep(four, 3) + " KC " + rep(".", 15)}});
+    return b.build({"intro", "groove", "hook", "groove", "hook2", "break", "hook", "hook2", "outro"});
+}
+
+Song chromeHelmets() {  // robot disco, A minor, 124 BPM
+    Builder b("CHROME HELMETS", "LES MACHINES", 124, 4);
+    b.echo(0.363f, 0.42f, 0.3f).pump(0.6f)
+        .track("bass", houseBass(), 0)
+        .track("arp", arpPluck(), -0.4f)
+        .track("stab", discoStab(), 0.3f)
+        .track("lead", talkBox(), 0);
+    // Am - F - C - G: an octave bass with a pickup into each bar.
+    const std::string bass = "A1 . A2 . A1 . A2 . A1 . A2 . A1 G1 A1 C2 | F1 . F2 . F1 . F2 . F1 . F2 . F1 E1 F1 A1 |"
+                             "C2 . C3 . C2 . C3 . C2 . C3 . C2 B1 C2 E2 | G1 . G2 . G1 . G2 . G1 . G2 . A1 . B1 .";
+    const std::string arp = rep("A4 E5 A5 E5 C6 E5 A5 E5", 2) + rep("F4 C5 F5 C5 A5 C5 F5 C5", 2) + rep("C5 G5 C6 G5 E6 G5 C6 G5", 2) +
+                            rep("G4 D5 G5 D5 B5 D5 G5 D5", 2);
+    const std::string stab = ". . . . A4:m . . A4:m . . . . A4:m . . . | . . . . F4:M . . F4:M . . . . F4:M . . . |"
+                             ". . . . C4:M . . C4:M . . . . C4:M . . . | . . . . G4:M . . G4:M . . . . G4:M . G4:M .";
+    const std::string four = "K . O . KP . O . K . O . KP . O O";
+    b.section("intro", {{"arp", arp}, {"drums", rep("K . . . K . . . K . . . K . . .", 3) + "K . H . KP . H . K . H . KP . P P"}});
+    b.section("verse", {{"bass", bass}, {"arp", arp}, {"drums", "KC . O . KP . O . K . O . KP . O O | " + rep(four, 3)},
+                        {"lead", "E5 - - - - - D5 - C5 - - - A4 - - - | C5/F5 - - - - - E5 - C5 - - - A4 - - - |"
+                                 "G4 - - - C5 - - - E5 - - - G5 - E5 - | D5/G5 - - - - - - - D5 - - - B4 - - -"}});
+    b.section("chorus", {{"bass", bass}, {"arp", arp}, {"stab", stab}, {"drums", rep(four, 3) + " K . O . KP . O . K . KP . KP KP KP KP"},
+                         {"lead", "A5 - - - G5 - E5 - - - A5 - C6 - A5 - | A5/C6 - - - - - A5 - F5 - - - C5 - - - |"
+                                  "E5 - - - G5 - C6 - - - E6 - D6 - C6 - | B5/D6 - - - - - - - B5 - G5 - D5 - - -"}});
+    b.section("break", {{"arp", arp}, {"stab", hold("A4:m", 16) + hold("F4:M", 16) + hold("C4:M", 16) + hold("G4:M", 16)},
+                        {"drums", rep(".", 32) + rep("H . H . H . H . H . H . H . H .", 1) + " K . . . K . . . K . K . K K K K"}});
+    b.section("outro", {{"bass", bass}, {"arp", arp}, {"drums", rep(four, 3) + " KC " + rep(".", 15)}});
+    return b.build({"intro", "verse", "chorus", "verse", "chorus", "break", "chorus", "chorus", "outro"});
+}
+
 // ------------------------------------------------------------ the radio
 
 Radio::Radio(gs::APU& apu) : apu_(apu) {
     songs_ = {neonKnuckles(), redlineRomance(), heartsInChrome(), rainOnNeon(), gravelBoogie(), sixCylinderShake(),
-              ironHeart(), launchWindow()};
-    stations_[0] = {"88.1", "THE BLADE", "HAIR METAL", V_ST_BLADE, {0, 1}};
+              ironHeart(), launchWindow(), oneMoreLap(), chromeHelmets()};
+    // French house first: it's what the radio is on when you start.
+    stations_[0] = {"107.7", "ROBOT FM", "FRENCH HOUSE", -1, {8, 9}};
     stations_[1] = {"101.5", "NEON FM", "SYNTH POP", V_ST_NEON, {2, 3}};
-    stations_[2] = {"94.7", "KOOL", "ROCK & ROLL", V_ST_KOOL, {4, 5}};
-    stations_[3] = {"96.6", "ARENA FM", "ANTHEMS", V_ST_ARENA, {6, 7}};
+    stations_[2] = {"88.1", "THE BLADE", "HAIR METAL", V_ST_BLADE, {0, 1}};
+    stations_[3] = {"94.7", "KOOL", "ROCK & ROLL", V_ST_KOOL, {4, 5}};
+    stations_[4] = {"96.6", "ARENA FM", "ANTHEMS", V_ST_ARENA, {6, 7}};
     kick_ = drum(0);
     snare_ = drum(1);
     clap_ = drum(2);
@@ -756,6 +891,7 @@ void Radio::startSong(bool fromTop) {
         if (i < int(s.tracks.size())) {
             apu_.setPatch(ch, s.tracks[i].patch);
             apu_.setPan(ch, s.tracks[i].pan);
+            apu_.setGain(ch, ducked_ ? 0.45f : 1.0f);
         } else {
             apu_.keyOff(ch);
         }
@@ -931,6 +1067,7 @@ void Radio::doStep() {
                 break;
         }
     }
+    if (s.drums[st.step].find('K') != std::string::npos) pumpT_ = 0;
     if (!s.drums[st.step].empty()) playDrums(s.drums[st.step]);
     st.step++;
 }
@@ -955,6 +1092,17 @@ void Radio::tick() {
         Live& lv = live_[i];
         if (lv.offIn > 0 && --lv.offIn == 0) apu_.keyOff(FIRST_CH + i);
         if (lv.bendIn > 0 && --lv.bendIn == 0) apu_.setFreq(FIRST_CH + i, lv.bendTo);
+    }
+    {
+        // The pump: each kick ducks the music, which swells back over the next quarter of a second.
+        const Song& ps = songs_[stations_[station_].songs[stations_[station_].song]];
+        if (ps.pump > 0) {
+            pumpT_++;
+            const float t = pumpT_ / 60.0f, k = std::max(0.0f, 1 - t / 0.24f);
+            const float g = 1 - ps.pump * k * k, under = ducked_ ? 0.45f : 1.0f;  // and still quieter under the co-driver
+            for (size_t i = 0; i < ps.tracks.size() && i < MAX_TRACKS; i++)
+                apu_.setGain(FIRST_CH + int(i), under * (ps.tracks[i].name == "bass" ? 1 - (1 - g) * 0.5f : g));
+        }
     }
     const float sf = songs_[stations_[station_].songs[stations_[station_].song]].stepFrames();
     timer_ -= 1;
