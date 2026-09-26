@@ -45,6 +45,11 @@
   window.addEventListener('keydown', (e) => { if (gameKeys.has(e.code)) e.preventDefault(); });
   // ?cart=rally32 (or run, rally) opens that game directly, skipping the multi-cart menu.
   const wantCart = new URLSearchParams(location.search).get('cart');
+  // The online scoreboard's server (empty: no online features). ?score= may point at this
+  // machine for testing, never anywhere else: a link must not be able to send players' names away.
+  window.S3_SCORE_URL = '';
+  const wantScore = new URLSearchParams(location.search).get('score');
+  if (wantScore && /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(wantScore)) window.S3_SCORE_URL = wantScore;
   var Module = {
     arguments: wantCart && /^[a-z0-9]+$/.test(wantCart) ? ['--cart', wantCart] : [],
     canvas,

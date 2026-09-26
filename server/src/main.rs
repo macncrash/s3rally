@@ -7,6 +7,9 @@
 //!   S3_VERIFIER       path to the s3 binary that runs `--verify-run`
 //!   S3_ADMIN_TOKEN    password for /admin (user "admin"); unset turns the dashboard off
 //!   S3_TRUST_PROXY=1  take client addresses from X-Forwarded-For (only behind your own proxy)
+//!   S3_REQUIRE_SIGNED=1  only signed requests (no bearer tokens)
+//!   S3_CORS_ORIGINS   web pages allowed to call it, comma-separated (the browser build)
+//!   S3_GITHUB_REPO, S3_GITHUB_TOKEN  feedback also opens an issue in owner/repo
 
 use std::net::SocketAddr;
 
@@ -30,6 +33,12 @@ fn main() {
         verifier: env("S3_VERIFIER").map(Into::into),
         games,
         trust_proxy: env("S3_TRUST_PROXY").as_deref() == Some("1"),
+        require_signed: env("S3_REQUIRE_SIGNED").as_deref() == Some("1"),
+        cors_origins: env("S3_CORS_ORIGINS").map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()).unwrap_or_default(),
+        github: match (env("S3_GITHUB_REPO"), env("S3_GITHUB_TOKEN")) {
+            (Some(repo), Some(token)) => Some(s3_scores::GitHub { repo, token }),
+            _ => None,
+        },
     };
     let addr: SocketAddr = env("S3_SCORES_ADDR").unwrap_or_else(|| "127.0.0.1:8790".into()).parse().unwrap_or_else(|_| fail("bad S3_SCORES_ADDR"));
     let st = s3_scores::state(cfg).unwrap_or_else(|e| fail(&e));

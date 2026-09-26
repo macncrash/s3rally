@@ -46,6 +46,22 @@ CREATE TABLE IF NOT EXISTS plays (
     at          INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS plays_game ON plays (game, at);
+CREATE TABLE IF NOT EXISTS auth_events (
+    id          INTEGER PRIMARY KEY,
+    player      TEXT,                      -- who it claimed to be (may not exist)
+    kind        TEXT NOT NULL,             -- skew, replay, badsig
+    detail      TEXT NOT NULL,
+    at          INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS feedback (
+    id          INTEGER PRIMARY KEY,
+    player      TEXT REFERENCES players(id) ON DELETE SET NULL,
+    game        TEXT NOT NULL,
+    build       TEXT NOT NULL,
+    text        TEXT NOT NULL,
+    issue_url   TEXT,
+    at          INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS ratings (
     player      TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
     game        TEXT NOT NULL,

@@ -22,7 +22,8 @@ The games are open source and the web build runs in the browser, so a secret ins
 
 | Layer | What it proves |
 |---|---|
-| **Token** from registration | The upload comes from whoever registered that ID |
+| **Token** from registration, used as a signing key | The upload comes from whoever registered that ID |
+| **Signed requests**: every signed-in call carries the computer's clock (ms), a one-time nonce and an HMAC-SHA256 over the method, path, time, nonce and body. The token itself never travels again | A copied request can't be sent twice, a changed one fails its signature, and clocks more than 10 s off are logged for review (refused beyond 15 min) |
 | **Ticket**, taken when a run starts: single use, stamped with the server's clock | The run started then, and each ticket counts once |
 | **Timing**: a timed run can't be handed in sooner than it could have been driven | Nobody submits a 2-minute stage 40 seconds after starting it |
 | **Replay**: the game's inputs plus a snapshot of the car every second. `s3 --verify-run` replays each second and checks it lands on the next snapshot, then that the stage ends at the claimed time | The time follows from real driving through the real physics |
@@ -50,10 +51,21 @@ S3_VERIFIER=$PWD/../s3 S3_ADMIN_TOKEN=$(openssl rand -hex 20) target/release/s3-
 | `S3_VERIFIER` | none | The `s3` binary that runs `--verify-run`. Without it, timed runs wait for review |
 | `S3_ADMIN_TOKEN` | none | Password for `/admin` (user `admin`), at least 20 characters. Without it, the dashboard is off |
 | `S3_TRUST_PROXY` | off | `1` takes client addresses from `X-Forwarded-For`. Only set it behind your own proxy |
+| `S3_REQUIRE_SIGNED` | off | `1` refuses plain bearer tokens: every signed-in call must be signed (the games always sign) |
+| `S3_CORS_ORIGINS` | none | Web pages that may call the API, comma-separated: the browser build's page |
+| `S3_GITHUB_REPO`, `S3_GITHUB_TOKEN` | none | Feedback also opens an issue in `owner/repo`. Use a fine-grained token with only issues access to that one repository |
 
 Games point at the server with `S3_SCORE_URL` or a `score_url=` line in the console settings (`console.cfg`). A game accepts only `https://`, or `http://` to this machine. With no server set, the online features are simply absent.
 
 **Adding a game:** add a line to `games.txt`. Points games, or games without a verifier yet, use `review`.
+
+## The dashboard
+
+`/admin` shows:
+- the games, most played first, with players, finishes, minutes and thumbs, marking quiet and disliked ones
+- runs waiting for review
+- players' feedback
+- the security log: bad signatures, replayed requests and clocks that were off
 
 ## Putting it on the internet
 
@@ -61,6 +73,8 @@ Games point at the server with `S3_SCORE_URL` or a `score_url=` line in the cons
 2. Put TLS in front: Caddy is simplest (`reverse_proxy 127.0.0.1:8790`), or nginx with Let's Encrypt. Keep the server itself on `127.0.0.1`, and set `S3_TRUST_PROXY=1`.
 3. Build `s3` on the same machine for `S3_VERIFIER`. It needs no display.
 4. Point the games at `https://your-host`.
+
+The Docker image does all of this for you: see **[DEPLOY.md](DEPLOY.md)**.
 
 ## API
 
@@ -74,9 +88,10 @@ Games point at the server with `S3_SCORE_URL` or a `score_url=` line in the cons
 | `POST /v1/plays {game, event, seconds}` | `start` or `finish` of a session |
 | `PUT /v1/ratings/{game} {thumb}` | +1 or -1; can be changed |
 | `GET /v1/stats` | Public popularity per game, for the launcher |
+| `POST /v1/feedback {game, text, build}` | Anyone. Kept for the dashboard, and opened as a GitHub issue when configured. The words go in a code block, so links and @mentions stay inert |
 | `GET /admin` | The dashboard (Basic auth) |
 
-Signed-in calls send `Authorization: Bearer <token>`.
+Signed-in calls send `X-S3-Auth: <id>:<unix ms>:<nonce>:<HMAC-SHA256(SHA-256(token), METHOD\nPATH\nms\nnonce\nhex(SHA-256(body)))>` (see `signed_requests` in `src/lib.rs`, and `ScoreClient::signature` in the game). Bearer tokens are still accepted unless `S3_REQUIRE_SIGNED=1`.
 
 ## Tests
 
