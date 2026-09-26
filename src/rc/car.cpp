@@ -48,19 +48,24 @@ float Car::rnd() {
     return float(rng_ >> 8) / 16777216.0f;
 }
 
+namespace {
+// Which segment a distance falls in, clamped to the course before it becomes an int.
+int segAt(const Course& c, float z) { return int(std::clamp(z / SEG, 0.0f, float(c.N - 1))); }
+}  // namespace
+
 const Segment& Car::seg(const Course& c) const { return c.segs[size_t(segIndex(c))]; }
-int Car::segIndex(const Course& c) const { return std::clamp(int(s * U / SEG), 0, c.N - 1); }
+int Car::segIndex(const Course& c) const { return segAt(c, s * U); }
 
 float Car::ground(const Course& c, float sAt) const {
     const float z = sAt * U;
-    const int i = std::clamp(int(z / SEG), 0, c.N - 1);
+    const int i = segAt(c, z);
     const Segment& g = c.segs[size_t(i)];
     const float t = clampf((z - g.z1) / SEG, 0, 1);
     return (g.y1 + (g.y2 - g.y1) * t) / U;
 }
 
 float Car::groundSlope(const Course& c, float sAt) const {
-    const int i = std::clamp(int(sAt * U / SEG), 0, c.N - 1);
+    const int i = segAt(c, sAt * U);
     const Segment& g = c.segs[size_t(i)];
     return (g.y2 - g.y1) / SEG;
 }
@@ -542,6 +547,76 @@ void Car::edges(const Course& c, float dt) {
         penalty += 12;
         why = "IN THE LAKE";
     }
+}
+
+}  // namespace rc
+
+namespace rc {
+
+// ---------------------------------------------------------------- replays
+
+CarSnapshot Car::snapshot(const Course& c) const {
+    CarSnapshot sn;
+    const float f[CarSnapshot::NF] = {s,        x,          psi,        u,         v,        r,         y,
+                                      vy,       airTime,    pitch,      pitchRate, roll,     rollRate,  steerAngle,
+                                      steerIn,  rpm,        throttle,   shiftT,    slip,     skid,      compress,
+                                      damage.engine, damage.suspension, damage.tyres, damage.body, stateT, penalty,
+                                      reverseTimer_, axPrev_, pullSide_};
+    std::copy(f, f + CarSnapshot::NF, sn.f);
+    int32_t* i = sn.i;
+    *i++ = airborne, *i++ = gear, *i++ = wheelspin, *i++ = damage.puncture, *i++ = int32_t(state), *i++ = specId;
+    *i++ = int32_t(rng_), *i++ = hitNext_, *i++ = assist_;
+    // Objects already hit, as (segment, index in that segment); -1 for an empty slot.
+    for (int k = 0; k < 4; k++) {
+        int32_t seg = -1, idx = -1;
+        if (hitList_[k] && hitSeg_[k] >= 0 && hitSeg_[k] < c.N) {
+            const auto& objs = c.segs[size_t(hitSeg_[k])].objs;
+            for (size_t j = 0; j < objs.size(); j++)
+                if (&objs[j] == hitList_[k]) seg = hitSeg_[k], idx = int32_t(j);
+        }
+        *i++ = seg;
+        *i++ = idx;
+    }
+    return sn;
+}
+
+bool Car::restore(const Course& c, const CarSnapshot& sn) {
+    for (float v0 : sn.f)
+        if (!std::isfinite(v0)) return false;
+    // Nothing a car on this course could be: a replay from the internet can say anything.
+    const float* f0 = sn.f;
+    const float len = float(c.N) * SEG / U;
+    if (f0[0] < -10 || f0[0] > len + 10 || std::fabs(f0[1]) > 300 || std::fabs(f0[6]) > 5000 || std::fabs(f0[26]) > 3600) return false;
+    for (int k : {3, 4, 5, 7, 10, 12}) // speeds and rates
+        if (std::fabs(f0[k]) > 500) return false;
+    for (int k : {2, 9, 11, 13, 14, 16, 18, 19, 20, 21, 22, 23, 24, 27, 28, 29})  // angles and 0..1 amounts
+        if (std::fabs(f0[k]) > 100) return false;
+    if (f0[15] < 0 || f0[15] > 20000 || f0[8] < 0 || f0[8] > 3600 || f0[17] < -1 || f0[17] > 10 || f0[25] < 0 || f0[25] > 3600) return false;
+    const int32_t* i = sn.i;
+    const int32_t air = i[0], gr = i[1], spin = i[2], punct = i[3], st = i[4], spec = i[5], rng = i[6], next = i[7], asst = i[8];
+    if (air < 0 || air > 1 || gr < -1 || gr > 6 || gr == 0 || spin < 0 || spin > 1 || punct < -1 || punct > 1 || st < 0 || st > 3 ||
+        spec < 0 || spec >= NUM_CARS || next < 0 || next > 3 || asst < 0 || asst > 1)
+        return false;
+    const Placed* hit[4] = {};
+    int hitSeg[4] = {};
+    for (int k = 0; k < 4; k++) {
+        const int32_t seg = i[9 + k * 2], idx = i[10 + k * 2];
+        if (seg == -1 && idx == -1) continue;
+        if (seg < 0 || seg >= c.N || idx < 0 || size_t(idx) >= c.segs[size_t(seg)].objs.size()) return false;
+        hit[k] = &c.segs[size_t(seg)].objs[size_t(idx)];
+        hitSeg[k] = seg;
+    }
+    const float* f = sn.f;
+    s = f[0], x = f[1], psi = f[2], u = f[3], v = f[4], r = f[5], y = f[6], vy = f[7], airTime = f[8];
+    pitch = f[9], pitchRate = f[10], roll = f[11], rollRate = f[12], steerAngle = f[13], steerIn = f[14];
+    rpm = f[15], throttle = f[16], shiftT = f[17], slip = f[18], skid = f[19], compress = f[20];
+    damage.engine = f[21], damage.suspension = f[22], damage.tyres = f[23], damage.body = f[24];
+    stateT = f[25], penalty = f[26], reverseTimer_ = f[27], axPrev_ = f[28], pullSide_ = f[29];
+    airborne = air, gear = gr, wheelspin = spin, damage.puncture = punct, state = CarState(st), specId = spec;
+    rng_ = uint32_t(rng), hitNext_ = next, assist_ = asst;
+    for (int k = 0; k < 4; k++) hitList_[k] = hit[k], hitSeg_[k] = hitSeg[k];
+    ev = CarEvents{};
+    return true;
 }
 
 }  // namespace rc

@@ -61,6 +61,15 @@ struct CarEvents {
 
 enum class CarState { Driving, Rolling, Recovering, Out };
 
+// Everything that feeds the car's physics, flattened for replays: continuous
+// state as floats, discrete state as integers. (Not the event flags, which are
+// cleared every step, or the message text.)
+struct CarSnapshot {
+    static constexpr int NF = 30, NI = 17;
+    float f[NF] = {};
+    int32_t i[NI] = {};
+};
+
 class Car {
 public:
     void reset(const Course& c, int seg, int spec);
@@ -114,6 +123,9 @@ public:
     const Segment& seg(const Course& c) const;
     int segIndex(const Course& c) const;
     float drift() const;          // slide angle between heading and travel, radians
+
+    CarSnapshot snapshot(const Course& c) const;
+    bool restore(const Course& c, const CarSnapshot& snap);  // false if the snapshot doesn't fit this course
 
 private:
     void airStep(const Course& c, const CarInput& in, float dt);

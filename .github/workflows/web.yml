@@ -31,6 +31,15 @@ jobs:
       - run: ./s3 --versus-test 2 --cart run
       - run: ./s3 --versus-test 1 --players 4 --cart run
       - run: ./s3 --versus-test 3 --players 4 --discover --cart run
+      - run: ./s3 --replay-test
+
+  scoreboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+      - run: cd server && cargo test
+      - run: ./tools/score-test.sh
 
   web:
     runs-on: ubuntu-latest
@@ -46,7 +55,7 @@ jobs:
           path: build-web
 
   deploy:
-    needs: [native, web]
+    needs: [native, web, scoreboard]
     runs-on: ubuntu-latest
     environment:
       name: github-pages

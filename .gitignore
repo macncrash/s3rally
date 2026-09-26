@@ -4,3 +4,7 @@ s3
 *.dSYM/
 reports/
 build-web/
+server/target/
+*.db
+*.db-wal
+*.db-shm

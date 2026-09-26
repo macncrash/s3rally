@@ -1,6 +1,7 @@
 // (3) RALLY - flow: menus, rallies, service, results.
 
 #include "game.h"
+#include "version.h"
 
 #include <algorithm>
 #include <cctype>
@@ -46,6 +47,7 @@ void RallyChamp::init(gs::System& sys) {
     voice_ = std::make_unique<Voice>(sys.apu);
     if (!sys.headless || sys.scripted) voice_->loadAsync(sys.dataPath("codriver/"));
     profile_ = rally::Profile::parse(sys.loadBlob("profile.txt"));
+    score_ = std::make_unique<gs::ScoreClient>(sys, "rally");
     std::memcpy(versus_.magic, "GSC1", 5);  // our own sessions, apart from S3 RUN's
     loadRecords();
     setupCrews();
@@ -206,6 +208,7 @@ void RallyChamp::beginStart() {
 }
 
 void RallyChamp::retire() {
+    rec_.clear();
     // Out of the stage. In a rally you can rejoin next stage with a penalty (Super Rally).
     finished_ = true;
     myPenalty_[stage_] += 300;
@@ -220,10 +223,20 @@ void RallyChamp::retire() {
 void RallyChamp::finishStage() {
     finished_ = true;
     const float total = stageTime_ + car_.penalty;
+    if (rec_.active()) rec_.finish(total);
     myTime_[stage_] = total;
     mode_ = Mode::Finish;
     t_ = 0;
     sfx_->fanfare();
+    // A personal best on this stage can go on the online board (if there is one, and the player hasn't said never).
+    const bool best = best_[stage_] == 0 || total < best_[stage_];
+    offerUpload_ = best && rec_.done() && score_ && score_->enabled() && score_->upload() != gs::ScoreClient::Upload::Never &&
+                   (score_->registered() || !score_->declined());
+    if (score_ && score_->registered()) score_->play(true, total);
+    if (best && game_ != Game::TimeAttack) {  // time attack keeps its own record (and ghost) below
+        best_[stage_] = total;
+        saveRecords();
+    }
     if (game_ == Game::TimeAttack) {
         newRecord_ = best_[stage_] == 0 || total < best_[stage_];
         if (newRecord_) {
@@ -357,6 +370,7 @@ void RallyChamp::frame(gs::System& sys) {
     const bool back = pad.pressed(gs::BTN_MODE) || pad.pressed(gs::BTN_B);
     updateMenus(confirm, back);
     updateOnline();
+    if (score_) score_->poll();
     if (!paused_) {
         updateOthers();
         updateParticles();
@@ -500,6 +514,16 @@ void RallyChamp::updateMenus(bool confirm, bool back) {
                 voice_->say(P_GO, true);
                 mode_ = Mode::Stage;
                 started_ = true;
+                noProgress_ = 0;
+                progressS_ = car_.s;
+                // Record the drive: a replay the score server can check (not in online races, which start mid-stage).
+                if (game_ != Game::Online) rec_.begin("rally", S3_VERSION_STRING, stage_, car_, course_, manual_);
+                else rec_.clear();
+                // A registered player's run starts with a server ticket, and counts as a play.
+                if (game_ != Game::Online && score_ && score_->registered() && score_->upload() != gs::ScoreClient::Upload::Never) {
+                    score_->startRun(stage_);
+                    score_->play(false);
+                }
                 t_ = 0;
                 say({"GO!"}, 50);
             }
@@ -526,7 +550,12 @@ void RallyChamp::updateMenus(bool confirm, bool back) {
             }
             if (pad.pressed(gs::BTN_A)) view_ = View((int(view_) + 1) % 3);
             stageTime_ += DT;
-            drive(readPad(), false);
+            {
+                // The car gets exactly what the replay records.
+                const RunInput q = quantize(readPad());
+                rec_.frame(q, car_, course_, noProgress_, progressS_);
+                drive(expand(q), false);
+            }
             stageClock();
             callNotes();
             recordGhost();
@@ -537,7 +566,14 @@ void RallyChamp::updateMenus(bool confirm, bool back) {
             if (t_ > 60 * 4) { mode_ = Mode::Result; t_ = 0; }
             break;
         case Mode::Result:
-            if (confirm && t_ > 40) afterResult();
+            if (net_ != Net::None) updateNet(confirm, back);
+            else if (offerUpload_ && t_ > 40) {
+                offerUpload_ = false;
+                netSel_ = netT_ = 0;
+                netSent_ = false;
+                if (score_->registered()) net_ = score_->upload() == gs::ScoreClient::Upload::Always ? Net::Uploading : Net::AskUpload;
+                else net_ = Net::AskJoin;
+            } else if (confirm && t_ > 40) afterResult();
             break;
         case Mode::Service:
             updateService(confirm, back);
@@ -585,7 +621,12 @@ void RallyChamp::updateProfile(bool confirm, bool back) {
             if (pad.pressed(gs::BTN_RIGHT) && nameEdit_.size() < rally::PROFILE_NAME_MAX) nameEdit_ += pendingChar_;
             if (pad.pressed(gs::BTN_LEFT) && !nameEdit_.empty()) nameEdit_.pop_back();
             while (!nameEdit_.empty() && nameEdit_.back() == ' ' && confirm) nameEdit_.pop_back();
-            if (back) {
+            if (back && netProfile_) {  // changed their mind about joining
+                netProfile_ = false;
+                mode_ = Mode::Result;
+                net_ = Net::None;
+                t_ = 41;
+            } else if (back) {
                 mode_ = profile_.valid() ? Mode::Menu : Mode::Title;
                 t_ = mode_ == Mode::Title ? 31 : 0;
             } else if (confirm && t_ > 5 && !nameEdit_.empty()) {
@@ -630,6 +671,15 @@ void RallyChamp::updateProfile(bool confirm, bool back) {
             break;
         default:
             if ((confirm || back) && t_ > 20) {
+                if (netProfile_) {  // opened to join the online board: carry on there
+                    netProfile_ = false;
+                    mode_ = Mode::Result;
+                    net_ = Net::Joining;
+                    netT_ = 0;
+                    netSent_ = false;
+                    t_ = 41;
+                    break;
+                }
                 mode_ = Mode::Menu;
                 menuSel_ = 0;
                 t_ = 0;
@@ -760,6 +810,123 @@ void RallyChamp::padFeedback() {
     if (want != ledColor_) {
         ledColor_ = want;
         sys_->setLight(((want >> 8) & 15) * 17, ((want >> 4) & 15) * 17, (want & 15) * 17);
+    }
+}
+
+}  // namespace rc
+
+namespace rc {
+
+// ================================================================ online scoreboard
+
+void RallyChamp::netUpload() {
+    // The replay goes with the time: the server drives it again before it counts.
+    score_->submit(stage_, myTime_[stage_], base64Encode(rec_.replay().encode()), S3_VERSION_STRING);
+    netSent_ = true;
+}
+
+void RallyChamp::updateNet(bool confirm, bool back) {
+    const gs::Pad& pad = sys_->pad;
+    netT_++;
+    auto choose = [&](int n) {
+        if (pad.pressed(gs::BTN_UP)) { netSel_ = (netSel_ + n - 1) % n; sfx_->menuMove(); }
+        if (pad.pressed(gs::BTN_DOWN)) { netSel_ = (netSel_ + 1) % n; sfx_->menuMove(); }
+        return confirm && netT_ > 10;
+    };
+    auto message = [&](const std::string& m) {
+        net_ = Net::Message;
+        netMsg_ = m;
+        netT_ = 0;
+    };
+    switch (net_) {
+        case Net::AskJoin:
+            if (back) net_ = Net::None;
+            else if (choose(3)) {
+                sfx_->menuSelect();
+                if (netSel_ == 0) {
+                    if (!profile_.valid()) {  // a name and an ID first, on the usual profile screen
+                        netProfile_ = true;
+                        startProfile(false);
+                    } else {
+                        net_ = Net::Joining;
+                        netT_ = 0;
+                        netSent_ = false;
+                    }
+                } else {
+                    if (netSel_ == 2) score_->decline();
+                    net_ = Net::None;
+                }
+            }
+            break;
+        case Net::Joining:
+            if (!netSent_) {
+                score_->registerPlayer(profile_.id, profile_.name);
+                netSent_ = true;
+            } else if (!score_->busy()) {
+                if (score_->registered()) {
+                    net_ = Net::Uploading;
+                    netSent_ = false;
+                } else {
+                    message(score_->error.empty() ? "COULD NOT JOIN" : score_->error);
+                }
+            }
+            break;
+        case Net::AskUpload:
+            if (back) net_ = Net::None;
+            else if (choose(3)) {
+                sfx_->menuSelect();
+                if (netSel_ == 1) net_ = Net::None;
+                else {
+                    if (netSel_ == 2) score_->setUpload(gs::ScoreClient::Upload::Always);
+                    net_ = Net::Uploading;
+                    netSent_ = false;
+                    netT_ = 0;
+                }
+            }
+            break;
+        case Net::Uploading:
+            if (!netSent_) netUpload();
+            else if (!score_->busy()) {
+                if (score_->lastStatus == "offline" || score_->lastStatus == "error" || score_->lastStatus.empty()) {
+                    message(score_->error.empty() ? "UPLOAD FAILED" : score_->error);
+                } else {
+                    score_->fetchBoard(stage_);
+                    net_ = Net::Board;
+                    netT_ = 0;
+                }
+            }
+            break;
+        case Net::Board:
+        case Net::Message:
+            if ((confirm || back) && netT_ > 30) {
+                net_ = Net::None;
+                t_ = 41;
+            }
+            break;
+        case Net::None:
+            break;
+    }
+}
+
+}  // namespace rc
+
+namespace rc {
+
+void RallyChamp::testNetScreen(int which) {
+    mode_ = Mode::Result;
+    myTime_[stage_ < 0 ? 0 : stage_] = 122.21f;
+    net_ = which == 0 ? Net::AskJoin : which == 1 ? Net::AskUpload : Net::Board;
+    netSel_ = 0;
+    netT_ = 45;
+    if (which == 2 && score_) {
+        gs::Board b;
+        b.loaded = true;
+        b.total = 212;
+        const char* names[] = {"KANKKUNEN", "MAKINEN", "SAINZ", "AURIOL", "MCRAE", "BURNS", "GRONHOLM", "LOEB", "ROHRL", "BLOMQVIST"};
+        for (int k = 0; k < 10; k++) b.top.push_back({k + 1, names[k], "", 101.4 + k * 1.7, false});
+        b.you = {37, profile_.name.empty() ? "YOU" : profile_.name, "", 122.21, true};
+        score_->board = b;
+        score_->lastStatus = "accepted";
     }
 }
 
