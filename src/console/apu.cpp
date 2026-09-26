@@ -157,6 +157,11 @@ void APU::setMaster(float v) {
     master_ = v;
 }
 
+void APU::setHostTrim(float v) {
+    std::lock_guard<std::mutex> l(m_);
+    hostTrim_ = std::clamp(v, 0.0f, 1.0f);
+}
+
 void APU::silence() {
     std::lock_guard<std::mutex> l(m_);
     for (auto& c : fm_)
@@ -308,7 +313,7 @@ void APU::render(float* out, int frames) {
             L += dL * echoWet_;
             R += dR * echoWet_;
         }
-        float ch[2] = {L * master_, R * master_};
+        float ch[2] = {L * master_ * hostTrim_, R * master_ * hostTrim_};
         for (int k = 0; k < 2; k++) {
             lp_[k] += (ch[k] - lp_[k]) * lpk;
             float y = lp_[k] - dcIn_[k] + 0.995f * dcOut_[k];

@@ -22,7 +22,8 @@ struct Pad {
     bool keys[BTN_COUNT] = {};
     bool padBtn[BTN_COUNT] = {};
     bool tapped[BTN_COUNT] = {};  // pressed since the last frame (catches taps shorter than a frame)
-    float axisX = 0;     // analog steering -1..1 (0 if none)
+    float axisX = 0;     // analog stick -1..1, + right (0 if none)
+    float axisY = 0;     // analog stick -1..1, + up (0 if none)
     float accel = 0;     // analog triggers 0..1
     float brake = 0;
     bool down(Button b) const { return cur[b]; }
@@ -125,6 +126,8 @@ private:
     void biosInit();
     bool biosStep();
     void chime();
+    void loadHostConfig();
+    bool hostFull_ = false;
 
     Cart* cart_ = nullptr;
     Cart* home_ = nullptr;
