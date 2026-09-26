@@ -26,6 +26,7 @@
 #include "multi.h"
 #include "multicart.h"
 #include "rc/game.h"
+#include "console/score.h"
 #include "rc32/rally32.h"
 #include "trailer.h"
 #include "version.h"
@@ -287,6 +288,234 @@ static int musicTest(const char* dir) {
     return rms > 0.01 && changes >= 2 ? 0 : 1;
 }
 
+// Replays: the autopilot drives every stage, each replay is encoded, decoded and
+// verified; then forged and damaged replays must be caught.
+static int replayTest() {
+    gs::System sys(true);
+    auto cart = std::make_unique<rc::RallyChamp>();
+    sys.bootCart(*cart);
+    int fails = 0;
+    auto check = [&](bool ok, const std::string& what) {
+        std::printf("%s %s\n", ok ? "ok  " : "FAIL", what.c_str());
+        fails += !ok;
+    };
+    std::string sample;
+    for (int s = 0; s < rc::NUM_STAGES; s++) {
+        const auto rep = cart->simulateStage(s, s % rc::NUM_CARS, nullptr, "");
+        const rc::RunRecorder& rec = cart->recorder();
+        if (!rep.finished || !rec.done()) {
+            check(false, "stage " + std::to_string(s) + " recorded");
+            continue;
+        }
+        const std::string bytes = rec.replay().encode();
+        rc::Replay back;
+        std::string why;
+        const bool decoded = rc::Replay::decode(bytes, back, why);
+        const rc::VerifyResult v = decoded ? rc::verifyReplay(back) : rc::VerifyResult{};
+        char line[160];
+        std::snprintf(line, sizeof line, "stage %2d  %6.2f s  %5zu frames  %5zu bytes  %s (%s)", s, double(rep.time), back.inputs.size(), bytes.size(),
+                      v.verdict == rc::Verdict::Accepted ? "accepted" : v.verdict == rc::Verdict::Review ? "review" : "rejected",
+                      decoded ? v.reason.c_str() : why.c_str());
+        check(decoded && v.verdict == rc::Verdict::Accepted && std::fabs(v.time - rep.time) < 0.001f, line);
+        if (s == 1) sample = bytes;
+    }
+    // Forgeries, on stage 1's replay.
+    rc::Replay base;
+    std::string why;
+    if (!rc::Replay::decode(sample, base, why)) return 1;
+    auto verdict = [](const rc::Replay& r) { return rc::verifyReplay(r).verdict; };
+    {
+        rc::Replay r = base;
+        r.claimed -= 1;
+        check(verdict(r) == rc::Verdict::Rejected, "a second off the claimed time: rejected");
+    }
+    {
+        rc::Replay r = base;
+        r.checkpoints[20].car.f[0] += 25;  // 25 m further down the road at 20 s
+        check(verdict(r) == rc::Verdict::Rejected, "teleport 25 m at a checkpoint: rejected");
+    }
+    {
+        rc::Replay r = base;
+        r.checkpoints[20].car.f[0] += 0.4f;  // a small nudge
+        check(verdict(r) != rc::Verdict::Accepted, "nudge 0.4 m at a checkpoint: not accepted");
+    }
+    {
+        rc::Replay r = base;
+        r.checkpoints[0].car.f[3] = 20;  // a flying start
+        check(verdict(r) == rc::Verdict::Rejected, "flying start: rejected");
+    }
+    {
+        rc::Replay r = base;
+        r.inputs.resize(r.inputs.size() - 30);  // stop before the line
+        r.checkpoints.resize((r.inputs.size() - 1) / rc::Replay::EVERY + 1);
+        check(verdict(r) == rc::Verdict::Rejected, "stops short of the finish: rejected");
+    }
+    {
+        rc::Replay r = base;
+        r.stage = 2;
+        check(verdict(r) == rc::Verdict::Rejected, "claims another stage: rejected");
+    }
+    {
+        rc::Replay r = base;
+        for (auto& q : r.inputs) q.throttle = 255;  // different inputs, same checkpoints
+        check(verdict(r) != rc::Verdict::Accepted, "inputs don't match the checkpoints: not accepted");
+    }
+    {
+        rc::Replay r = base;
+        r.damage.engine = -1;
+        check(verdict(r) == rc::Verdict::Rejected, "impossible car condition: rejected");
+    }
+    // Damaged files: every truncation, and random byte changes, must be refused or verified without crashing.
+    int refused = 0;
+    for (size_t n = 0; n < sample.size(); n += 97) {
+        rc::Replay r;
+        refused += !rc::Replay::decode(sample.substr(0, n), r, why);
+    }
+    check(refused == int((sample.size() + 96) / 97), "every truncated file refused");
+    uint32_t seed = 1;
+    int survived = 0;
+    for (int k = 0; k < 400; k++) {
+        std::string b = sample;
+        for (int j = 0; j < 1 + k % 5; j++) {
+            seed = seed * 1664525u + 1013904223u;
+            b[seed % b.size()] = char(seed >> 24);
+        }
+        rc::Replay r;
+        if (rc::Replay::decode(b, r, why)) rc::verifyReplay(r);
+        survived++;
+    }
+    check(survived == 400, "400 randomly damaged files handled");
+    std::printf("\n%s\n", fails ? "REPLAY TEST FAILED" : "REPLAY TEST OK");
+    return fails ? 1 : 0;
+}
+
+// The online scoreboard end to end, against a running s3-scores server
+// (S3_SCORE_URL; see tools/score-test.sh, which starts one). The game's own
+// client joins, drives a stage for real, uploads it, and tries some forgeries.
+static int netShots(const char* dir) {
+    gs::System sys(true);
+    auto cart = std::make_unique<rc::RallyChamp>();
+    sys.bootCart(*cart);
+    cart->testProfile("TESTER");
+    cart->simulateStage(1, 1, nullptr, "");
+    for (int k = 0; k < 3; k++) {
+        cart->testNetScreen(k);
+        sys.step();
+        sys.render();
+        sys.saveScreenshot(std::string(dir) + "/net" + std::to_string(k) + ".png");
+    }
+    return 0;
+}
+
+static int scoreTest() {
+    if (!std::getenv("S3_SCORE_URL")) {
+        std::printf("set S3_SCORE_URL to a test server (tools/score-test.sh does this)\n");
+        return 1;
+    }
+    gs::System sys(true);
+    auto cart = std::make_unique<rc::RallyChamp>();
+    sys.bootCart(*cart);
+    cart->testProfile("TESTER");
+    gs::ScoreClient* sc = cart->scoreClient();
+    int fails = 0;
+    auto check = [&](bool ok, const std::string& what) {
+        std::printf("%s %s\n", ok ? "ok  " : "FAIL", what.c_str());
+        fails += !ok;
+    };
+    check(sc && sc->enabled(), "a server is set: " + gs::scoreServerUrl());
+    if (!sc || !sc->enabled()) return 1;
+    sc->registerPlayer(cart->profile().id, "TESTER");
+    sc->wait();
+    check(sc->registered(), "joined with the game's own player ID");
+    sc->registerPlayer(cart->profile().id, "COPYCAT");
+    sc->wait();
+    check(sc->error == "ID ALREADY REGISTERED", "the same ID can't join twice");
+
+    // A real drive: the ticket is taken at GO, the replay recorded as it goes.
+    const auto run = cart->simulateStage(1, 1, nullptr, "");
+    sc->wait();
+    check(run.finished && sc->haveTicket(), "drove stage 2 with a start ticket");
+    const std::string replay = rc::base64Encode(cart->recorder().replay().encode());
+    sc->submit(1, run.time, replay, "score-test");
+    sc->wait();
+    // The replay checks out, but a 2-minute stage "finished" a second after its ticket
+    // (the test drives at full speed) can't go straight on the board.
+    check(sc->lastStatus == "review" && sc->lastReason.find("sooner") != std::string::npos,
+          "verified, then held: handed in sooner than it could have ended (" + sc->lastReason + ")");
+
+    auto attempt = [&](int stage, double score, const std::string& rep) {
+        sc->startRun(stage);
+        sc->wait();
+        sc->submit(stage, score, rep, "score-test");
+        sc->wait();
+        return sc->lastStatus;
+    };
+    check(attempt(1, run.time - 5, replay) == "rejected", "five seconds shaved off the time: rejected");
+    check(attempt(2, run.time, replay) == "rejected", "stage 2's replay handed in for stage 3: rejected");
+    check(attempt(1, run.time, rc::base64Encode("not a replay at all")) == "rejected", "a made-up replay: rejected");
+    {
+        rc::Replay forged = cart->recorder().replay();
+        forged.checkpoints[30].car.f[0] += 40;  // 40 m further along at 30 s
+        check(attempt(1, run.time, rc::base64Encode(forged.encode())) == "rejected", "a teleport in the replay: rejected");
+    }
+    sc->submit(1, run.time, replay, "score-test");  // no ticket this time
+    sc->wait();
+    check(sc->lastStatus == "review", "no start ticket: held for a person");
+
+    sc->fetchBoard(1);
+    sc->wait();
+    check(sc->board.loaded && sc->board.total == 0, "nothing unchecked reaches the board");
+    sc->rate(1);
+    sc->play(true, 30);
+    sc->wait();
+    check(sc->error.empty() || sc->error == "ID ALREADY REGISTERED", "rated the game and reported a play");
+    std::printf("\n%s\n", fails ? "SCORE TEST FAILED" : "SCORE TEST OK");
+    return fails ? 1 : 0;
+}
+
+// The autopilot drives STAGE and its replay is written to FILE (for testing a score server).
+static int writeReplay(int stage, const char* path) {
+    gs::System sys(true);
+    auto cart = std::make_unique<rc::RallyChamp>();
+    sys.bootCart(*cart);
+    const auto r = cart->simulateStage(stage, stage % rc::NUM_CARS, nullptr, "");
+    if (!r.finished || !cart->recorder().done()) return 1;
+    const std::string bytes = cart->recorder().replay().encode();
+    FILE* f = std::fopen(path, "wb");
+    if (!f) return 1;
+    std::fwrite(bytes.data(), 1, bytes.size(), f);
+    std::fclose(f);
+    std::printf("stage %d: %.3f s, %zu bytes\n", stage, double(r.time), bytes.size());
+    return 0;
+}
+
+// The score server's check: replay a stage from FILE and print one line of JSON.
+// Exit 0 accepted, 1 review, 2 rejected. No window, no sound: only the rules.
+static int verifyRun(const char* path) {
+    std::string bytes;
+    if (FILE* f = std::fopen(path, "rb")) {
+        char buf[65536];
+        size_t n;
+        while ((n = std::fread(buf, 1, sizeof buf, f)) > 0 && bytes.size() < (4u << 20)) bytes.append(buf, n);
+        std::fclose(f);
+    }
+    rc::Replay rep;
+    std::string why;
+    if (bytes.size() >= (4u << 20) || !rc::Replay::decode(bytes, rep, why)) {
+        std::printf("{\"verdict\":\"rejected\",\"reason\":\"%s\"}\n", bytes.empty() ? "no replay" : why.empty() ? "too big" : why.c_str());
+        return 2;
+    }
+    const rc::VerifyResult r = rc::verifyReplay(rep);
+    // The game name came in the file: print it only if it is plain (the server trusts the exit code, not this text).
+    std::string game = rep.game;
+    for (char& c : game)
+        if (!std::islower(static_cast<unsigned char>(c)) && !std::isdigit(static_cast<unsigned char>(c))) c = '?';
+    const char* v = r.verdict == rc::Verdict::Accepted ? "accepted" : r.verdict == rc::Verdict::Review ? "review" : "rejected";
+    std::printf("{\"verdict\":\"%s\",\"game\":\"%s\",\"stage\":%d,\"time\":%.3f,\"claimed\":%.3f,\"frames\":%zu,\"reason\":\"%s\"}\n", v,
+                game.c_str(), rep.stage, double(r.time), double(rep.claimed), rep.inputs.size(), r.reason.c_str());
+    return r.verdict == rc::Verdict::Accepted ? 0 : r.verdict == rc::Verdict::Review ? 1 : 2;
+}
+
 int main(int argc, char** argv) {
     bool sim = false;
     std::string cartName;
@@ -316,6 +545,11 @@ int main(int argc, char** argv) {
             const int players = i + 2 < argc && std::isdigit(static_cast<unsigned char>(argv[i + 2][0])) ? std::atoi(argv[i + 2]) : 4;
             return recordQuad(players, 0, argv[i + 1], cartName != "run");
         }
+        else if (!std::strcmp(argv[i], "--verify-run") && i + 1 < argc) return verifyRun(argv[i + 1]);
+        else if (!std::strcmp(argv[i], "--replay-test")) return replayTest();
+        else if (!std::strcmp(argv[i], "--write-replay") && i + 2 < argc) return writeReplay(std::atoi(argv[i + 1]), argv[i + 2]);
+        else if (!std::strcmp(argv[i], "--score-test")) return scoreTest();
+        else if (!std::strcmp(argv[i], "--net-shots") && i + 1 < argc) return netShots(argv[i + 1]);
         else if (!std::strcmp(argv[i], "--record-rally") && i + 1 < argc) return recordRally(argv[i + 1]);
         else if (!std::strcmp(argv[i], "--music-test") && i + 1 < argc) return musicTest(argv[i + 1]);
         else if (!std::strcmp(argv[i], "--music-dir")) {

@@ -198,16 +198,7 @@ void RallyChamp::drive(const CarInput& in, bool attract) {
         (SURF[car_.seg(course_).surf].rough || std::fabs(car_.x) > car_.seg(course_).hw + 0.5f || (car_.seg(course_).flags & F_BUMPS)))
         sys_->rumble(0.25f, 0.05f, 110);
     // Beached off the road and going nowhere: spectators push the car back out.
-    if (car_.state == CarState::Driving && std::fabs(car_.x) > car_.seg(course_).hw + 0.5f && car_.s - progressS_ < 3) {
-        if (++noProgress_ > 60 * 10) {
-            car_.recover("PUSHED OUT", 5);
-            if (live) say({"STUCK!", "PUSHED OUT +5S"}, 150, PAL_RED);
-            noProgress_ = 0;
-        }
-    } else {
-        noProgress_ = 0;
-        progressS_ = car_.s;
-    }
+    if (pushOutRule(car_, course_, noProgress_, progressS_) && live) say({"STUCK!", "PUSHED OUT +5S"}, 150, PAL_RED);
     if (shake_ > 0) shake_ *= 0.88f;
     if (shake_ < 0.3f) shake_ = 0;
 

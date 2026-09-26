@@ -11,7 +11,9 @@
 
 #include "art.h"
 #include "car.h"
+#include "replay.h"
 #include "console/system.h"
+#include "console/score.h"
 #include "course.h"
 #include "game/profile.h"
 #include "game/radio.h"
@@ -82,6 +84,11 @@ public:
     SimReport simulateStage(int stage, int car, std::vector<std::string>* shots, const std::string& shotDir);
     float romUsedMB() const;
     int tilesUsed() const { return tilesUsed_; }
+    const RunRecorder& recorder() const { return rec_; }
+    gs::ScoreClient* scoreClient() { return score_.get(); }
+    const rally::Profile& profile() const { return profile_; }
+    // Screenshots of the scoreboard screens: 0 join, 1 upload, 2 board (sample rows).
+    void testNetScreen(int which);
     void testProfile(const std::string& name);
     void testOpenProfile() { startProfile(true); }
     void testBotSkill(float s) { botSkill_ = s; }
@@ -104,6 +111,17 @@ public:
     int stuckT_ = 0;   // autopilot: frames spent stuck
     float progressS_ = 0;  // where we were when the stuck clock started
     int noProgress_ = 0;   // frames off the road without getting anywhere
+    RunRecorder rec_;      // the stage being driven, for the online scoreboard
+    // The online scoreboard, after a personal best: join, upload, see where you stand.
+    enum class Net { None, AskJoin, Joining, AskUpload, Uploading, Board, Message };
+    std::unique_ptr<gs::ScoreClient> score_;
+    Net net_ = Net::None;
+    int netSel_ = 0, netT_ = 0;
+    bool offerUpload_ = false, netProfile_ = false, netSent_ = false;
+    std::string netMsg_;
+    void updateNet(bool confirm, bool back);
+    void drawNet();
+    void netUpload();
     bool driving() const { return mode_ == Mode::Stage; }
     int modeId() const { return int(mode_); }  // for scripted tests
     const Car& car() const { return car_; }

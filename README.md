@@ -96,6 +96,17 @@ bilinear filtering with mipmaps so distant gravel doesn't shimmer, and 640×480
 in 24-bit colour. It draws the screen in bands on parallel pipelines. Run
 `./s3 --cart rally64`, or pick it from the multi-cart.
 
+## Online scoreboard (optional)
+
+Set a personal best on a stage and the game can put it on an online board. You join once, with the
+player ID the game already made and your name, and nothing else. Each run carries a replay of your
+inputs, and the server drives it again with the game's own code before the time counts, so edited or
+made-up times don't get on. After uploading you see the stage's top ten and where you stand.
+Registered players also count as plays and can give a game a thumbs up or down; a dashboard shows
+which games are played and which have gone quiet. It's all off unless a server is set
+(`S3_SCORE_URL`). The server, its trust model and how to run it are in
+**[server/README.md](server/README.md)**. Desktop builds only for now.
+
 ## S3 RUN
 
 The original: a four-stage arcade racer in the OutRun mould. It also lives on as its own game,
@@ -283,6 +294,8 @@ src/           main · multicart (the menu) · multi (several consoles in one pr
 ./s3 --radio DIR            # render each radio station to a WAV
 ./s3 --music-test DIR       # check YOUR MUSIC loads, plays and advances with a folder
 ./s3 --versus-test [STAGE] [--players N] [--discover] [--cart run]   # 2-4 consoles race over loopback UDP
+./s3 --replay-test             # record every stage, verify the replays, catch forged ones
+./tools/score-test.sh          # the online scoreboard end to end (needs cargo)
 ```
 
 The daily simulation drives all fifteen (3) Rally stages with the three

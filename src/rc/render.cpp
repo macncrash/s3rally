@@ -238,7 +238,7 @@ void RallyChamp::drawRoad(float& camS, float& camX, float& camY, float& camPsi) 
     dusty = clampf(dusty, 0, 7);
 
     // Sky, fog and the parallax backdrop.
-    const int dimFog = menu ? 9 : 0;
+    const int dimFog = menu ? (net_ != Net::None ? 13 : 9) : 0;  // deeper behind the scoreboard's long lists
     const bool night = loadedTod_ == 2;
     const uint16_t skyTop = night ? gs::rgb4(0, 0, 2) : loadedTod_ == 1 ? gs::rgb4(4, 3, 8) : V.skyTop;
     const uint16_t skyHor = night ? gs::rgb4(2, 3, 6) : loadedTod_ == 1 ? gs::rgb4(15, 8, 4) : V.skyHorizon;
@@ -270,7 +270,7 @@ void RallyChamp::drawWorld(float camS, float camX, float camY, float camPsi) {
     const int N = course_.N;
     const int vis = int(frameNo_ & 0x7fffffff);
     const bool menu = mode_ != Mode::Start && mode_ != Mode::Stage && mode_ != Mode::Finish && mode_ != Mode::Title;
-    const int dimFog = menu ? 9 : 0;
+    const int dimFog = menu ? (net_ != Net::None ? 13 : 9) : 0;  // deeper behind the scoreboard's long lists
     const float camZ = camS * U;
     const int base = std::clamp(int(camZ / SEG), 0, N - 1);
     const View view = (mode_ == Mode::Start || mode_ == Mode::Stage || mode_ == Mode::Finish) ? view_ : View::Chase;
@@ -742,6 +742,10 @@ void RallyChamp::drawMenus() {
 }
 
 void RallyChamp::drawResult() {
+    if (net_ != Net::None) {
+        drawNet();
+        return;
+    }
     const Venue& V = venue(venue_);
     text("SS" + std::to_string(stageNo_ + 1) + " " + course_.name, HALF, 8, 1.1f, PAL_YELLOW);
     if (game_ == Game::TimeAttack) {
@@ -876,6 +880,83 @@ void RallyChamp::drawProfile() {
             text(profile_.name, HALF, 78, 2, PAL_YELLOW);
             hud(10, 15, "DRIVER ID " + profile_.shortId(), PAL_HUD);
             if (t_ > 20 && frameNo_ % 60 < 40) hud(14, 24, "PRESS START", PAL_YELLOW);
+            break;
+    }
+}
+
+}  // namespace rc
+
+namespace rc {
+
+void RallyChamp::drawNet() {
+    auto options = [&](int row, std::initializer_list<const char*> opts) {
+        int k = 0;
+        for (const char* o : opts) {
+            const std::string s = std::string(k == netSel_ ? "> " : "  ") + o;
+            hud(20 - int(s.size()) / 2, row + k * 2, s, k == netSel_ ? PAL_YELLOW : PAL_HUD);
+            k++;
+        }
+    };
+    const std::string t = fmtTime(myTime_[stage_]);
+    switch (net_) {
+        case Net::AskJoin:
+            text("PERSONAL BEST!", HALF, 24, 1.4f, PAL_YELLOW);
+            text(t, HALF, 52, 2, PAL_HUD);
+            hud(6, 12, "PUT IT ON THE ONLINE BOARD?", PAL_HUD);
+            hud(5, 14, "YOUR NAME AND PLAYER ID ONLY", PAL_HUD);
+            options(17, {"YES, JOIN", "NOT NOW", "NEVER ASK"});
+            break;
+        case Net::Joining:
+            text("JOINING", HALF, 80, 1.6f, PAL_HUD);
+            hud(14, 15, profile_.name, PAL_YELLOW);
+            break;
+        case Net::AskUpload:
+            text("PERSONAL BEST!", HALF, 24, 1.4f, PAL_YELLOW);
+            text(t, HALF, 52, 2, PAL_HUD);
+            hud(7, 13, "UPLOAD TO THE ONLINE BOARD?", PAL_HUD);
+            options(16, {"UPLOAD", "NOT THIS TIME", "ALWAYS UPLOAD"});
+            break;
+        case Net::Uploading:
+            text("UPLOADING", HALF, 80, 1.6f, PAL_HUD);
+            hud(8, 15, "THE SERVER DRIVES IT AGAIN", PAL_HUD);
+            break;
+        case Net::Board: {
+            const gs::Board& b = score_->board;
+            text("SS" + std::to_string(stageNo_ + 1) + " " + course_.name, HALF, 6, 1, PAL_YELLOW);
+            const std::string& st = score_->lastStatus;
+            const std::string verdict = st == "accepted"   ? "ON THE BOARD"
+                                        : st == "review"   ? "CHECKING: SHOWS SOON"
+                                        : st == "rejected" ? "NOT ACCEPTED"
+                                                           : "NOT SENT";
+            hud(20 - int(verdict.size()) / 2, 3, verdict, st == "accepted" ? PAL_YELLOW : PAL_RED);
+            if (!b.loaded) {
+                hud(15, 12, score_->busy() ? "LOADING" : "NO BOARD", PAL_HUD);
+                break;
+            }
+            int row = 5;
+            for (const gs::BoardRow& r : b.top) {
+                char line[48];
+                std::snprintf(line, sizeof line, "%3d %-12s %s", r.rank, r.name.c_str(), fmtTime(float(r.score)).c_str());
+                hud(6, row++, line, r.you ? PAL_YELLOW : PAL_HUD);
+            }
+            if (b.you.rank > 10) {
+                char line[48];
+                std::snprintf(line, sizeof line, "%3d %-12s %s", b.you.rank, b.you.name.c_str(), fmtTime(float(b.you.score)).c_str());
+                hud(6, row + 1, line, PAL_YELLOW);
+            }
+            if (b.you.rank > 0) {
+                const std::string where = "YOU: " + std::to_string(b.you.rank) + " OF " + std::to_string(b.total);
+                hud(20 - int(where.size()) / 2, 23, where, PAL_YELLOW);
+            }
+            if (netT_ > 30 && frameNo_ % 60 < 40) hud(14, 25, "PRESS START", PAL_YELLOW);
+            break;
+        }
+        case Net::Message:
+            text("ONLINE BOARD", HALF, 60, 1.4f, PAL_HUD);
+            hud(20 - int(netMsg_.size()) / 2, 14, netMsg_, PAL_RED);
+            hud(4, 17, "YOUR TIME IS SAVED ON THIS MACHINE", PAL_HUD);
+            break;
+        case Net::None:
             break;
     }
 }

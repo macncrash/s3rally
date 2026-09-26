@@ -1,0 +1,6 @@
+# Games the scoreboard knows: slug, how it's scored, how runs are checked, title.
+#   time   = lower is better (seconds)      points = higher is better
+#   verify = replayed by S3_VERIFIER         review = waits for a person
+rally    time verify (3) RALLY
+rally32  time verify (3) RALLY 32
+rally64  time verify (3) RALLY 64
