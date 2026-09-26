@@ -351,10 +351,12 @@ void System::pollEvents() {
                 const bool alt = (e.key.keysym.mod & KMOD_ALT) != 0;
                 if (!e.key.repeat) {  // hotkeys fire once per press
                     if (k == SDLK_F1) crt = !crt;
+#ifndef __EMSCRIPTEN__  // in a browser the page does it: fullscreen is only allowed from its own key handler
                     if (k == SDLK_F11 || (k == SDLK_RETURN && alt)) {
                         bool fs = SDL_GetWindowFlags(win_) & SDL_WINDOW_FULLSCREEN_DESKTOP;
                         SDL_SetWindowFullscreen(win_, fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
                     }
+#endif
                     if (k == SDLK_F12) {
                         std::string p = dataPath("shot-" + std::to_string(frame) + ".png");
                         if (saveScreenshot(p)) std::printf("screenshot: %s\n", p.c_str());

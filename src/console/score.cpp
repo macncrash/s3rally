@@ -166,6 +166,30 @@ bool slugOk(const std::string& s) {
 
 }  // namespace
 
+// The S3 score server, and the public keys its certificate may use (SHA-256 of the
+// SubjectPublicKeyInfo, as curl --pinnedpubkey wants). The desktop console refuses any other
+// key for that host, even with a certificate a trusted authority issued. Keep a spare
+// key's pin here too, so the server can move to it without stranding shipped consoles.
+const char* const DEFAULT_SCORE_URL = "https://s3.cyberducky.ai";
+struct Pin {
+    const char* host;
+    const char* pins;  // ";"-separated sha256//<base64>
+};
+const Pin PINS[] = {
+    {"s3.cyberducky.ai",  // primary (served now); backup (offline rotation key)
+     "sha256//OFTa1sUTFiR5FL7sSx2RU3j1NwEHZRk40iiMcQaZv/o=;sha256//wJdSZwc/0TwFlwYfqKbgsR5QYKqfEJM7N6qFHklfwYs="},
+};
+
+std::string pinFor(const std::string& url) {
+    const std::string p = "https://";
+    if (url.rfind(p, 0) != 0) return {};
+    std::string host = url.substr(p.size());
+    host = host.substr(0, host.find_first_of(":/"));
+    for (const Pin& pin : PINS)
+        if (host == pin.host) return pin.pins;
+    return {};
+}
+
 std::string scoreServerUrl() {
     std::string u;
     if (const char* e = std::getenv("S3_SCORE_URL")) u = e;
@@ -188,6 +212,8 @@ std::string scoreServerUrl() {
     if (u.empty()) u = emscripten_run_script_string("(typeof window !== 'undefined' && window.S3_SCORE_URL) || ''");
 #endif
     while (!u.empty() && (u.back() == '/' || u.back() == '\r' || u.back() == ' ')) u.pop_back();
+    if (u == "off") return {};  // score_url=off: no online features at all
+    if (u.empty()) u = DEFAULT_SCORE_URL;
     const bool https = u.rfind("https://", 0) == 0;
     const bool local = u.rfind("http://127.0.0.1", 0) == 0 || u.rfind("http://localhost", 0) == 0 || u.rfind("http://[::1]", 0) == 0;
     if (u.empty() || u.size() > 200 || !urlSafe(u) || (!https && !local)) return {};
@@ -330,12 +356,14 @@ void ScoreClient::send(const std::string& kind, const std::string& method, const
     call->kind = kind;
     const std::string url = url_ + path;
     const std::string sig = auth ? signature(method, path, body) : std::string();
+    const std::string pin = pinFor(url);
 #ifdef __EMSCRIPTEN__
     static int nextId = 1;
     call->webId = nextId++;
+    (void)pin;  // a page can't pin: the browser checks the certificate
     s3_fetch(call->webId, method.c_str(), url.c_str(), sig.c_str(), body.c_str());
 #else
-    call->worker = std::thread([call, url, method, body, sig] {
+    call->worker = std::thread([call, url, method, body, sig, pin] {
         // Headers and body go through private temp files, never the command line:
         // nothing here reaches a shell unquoted.
         namespace fs = std::filesystem;
@@ -369,6 +397,7 @@ void ScoreClient::send(const std::string& kind, const std::string& method, const
         }
         const bool https = url.rfind("https://", 0) == 0;
         std::string cmd = "curl -sS --max-time 20 --proto " + std::string(https ? "=https" : "=http") + " -X " + method + " -H @'" + hf + "'";
+        if (!pin.empty()) cmd += " --pinnedpubkey '" + pin + "'";  // only this server's own key will do
         if (!bf.empty()) cmd += " --data-binary @'" + bf + "'";
         cmd += " -o '" + of + "' -w '%{http_code}' '" + url + "' 2>/dev/null";
         std::string code;

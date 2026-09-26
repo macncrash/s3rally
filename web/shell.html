@@ -19,6 +19,11 @@
   .keys { color: var(--dim); text-align: center; max-width: 960px; }
   kbd { background: #2d2e35; border: 1px solid #40414a; border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; color: var(--ink); }
   a { color: var(--sun); }
+  /* Fullscreen: just the screen, letterboxed to 4:3. */
+  .screen:fullscreen { width: 100vw; height: 100vh; aspect-ratio: auto; border: 0; border-radius: 0; }
+  .screen:fullscreen canvas { object-fit: contain; }
+  button.full { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  button.full:hover, button.full:focus-visible { border-color: var(--sun); outline: none; }
 </style>
 </head>
 <body>
@@ -33,7 +38,7 @@
     <kbd>←</kbd><kbd>→</kbd> steer · <kbd>C</kbd>/<kbd>↑</kbd> accelerate · <kbd>X</kbd>/<kbd>↓</kbd> brake ·
     <kbd>Space</kbd> handbrake · <kbd>Q</kbd>/<kbd>W</kbd> gears · <kbd>V</kbd> view · <kbd>Tab</kbd> radio ·
     <kbd>Enter</kbd> start/pause · <kbd>Esc</kbd> back (on a title screen: pick another game) · <kbd>F11</kbd> fullscreen · gamepads work too
-    <br><a href="https://github.com/macncrash/s3rally">source on GitHub</a>
+    <br><button class="full" id="full" type="button">Fullscreen</button> · <a href="https://github.com/macncrash/s3rally">source on GitHub</a>
   </div>
 <script>
   const overlay = document.getElementById('overlay');
@@ -43,11 +48,27 @@
   // Keep the browser from scrolling or moving focus on game keys.
   const gameKeys = new Set(['Tab', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Backspace']);
   window.addEventListener('keydown', (e) => { if (gameKeys.has(e.code)) e.preventDefault(); });
+  // Fullscreen: browsers only allow it from the page's own key or click handler, so the page
+  // does it (F11 or Alt+Enter, or the button), not the game. Just the screen goes fullscreen.
+  const screenEl = document.querySelector('.screen');
+  function toggleFull() {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else if (screenEl.requestFullscreen) screenEl.requestFullscreen().then(() => canvas.focus()).catch(() => {});
+  }
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'F11' || (e.code === 'Enter' && e.altKey)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      toggleFull();
+    }
+  }, true);
+  document.getElementById('full').addEventListener('click', toggleFull);
   // ?cart=rally32 (or run, rally) opens that game directly, skipping the multi-cart menu.
   const wantCart = new URLSearchParams(location.search).get('cart');
-  // The online scoreboard's server (empty: no online features). ?score= may point at this
-  // machine for testing, never anywhere else: a link must not be able to send players' names away.
-  window.S3_SCORE_URL = '';
+  // The online scoreboard's server. (Browsers can't pin its key as the desktop console does; they
+  // check its certificate the usual way.) ?score= may point at this machine for testing, never
+  // anywhere else: a link must not be able to send players' names away.
+  window.S3_SCORE_URL = 'https://s3.cyberducky.ai';
   const wantScore = new URLSearchParams(location.search).get('score');
   if (wantScore && /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(wantScore)) window.S3_SCORE_URL = wantScore;
   var Module = {
