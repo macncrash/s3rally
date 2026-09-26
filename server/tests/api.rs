@@ -38,6 +38,9 @@ fn setup() -> T {
         verifier: Some(fake_verifier(dir.path())),
         games: s3_scores::parse_games("rally time verify (3) RALLY\npuzzle points review A PUZZLE\n").unwrap(),
         trust_proxy: false,
+        require_signed: false,
+        cors_origins: vec!["https://example.test".into()],
+        github: None,
     };
     T { app: s3_scores::router(s3_scores::state(cfg).unwrap()), _dir: dir }
 }
@@ -268,4 +271,108 @@ async fn a_run_without_a_ticket_waits_for_a_person() {
     assert_eq!(v["status"], "rejected", "the replay is still checked: {v}");
     let (s, _) = t.call("POST", "/v1/runs", Some(&a), Some(json!({"game": "nosuch", "stage": 2, "score": 0.5}))).await;
     assert_eq!(s, StatusCode::NOT_FOUND);
+}
+
+/// A request signed the way the games sign them.
+fn signed(method: &str, uri: &str, id: &str, token: &str, ms: i64, nonce: &str, body: Option<Value>) -> Request<Body> {
+    use sha2::{Digest, Sha256};
+    let bytes = body.map(|b| b.to_string()).unwrap_or_default();
+    let key = Sha256::digest(token.as_bytes());
+    let sig = hex::encode(s3_scores::hmac_sha256(&key, s3_scores::signing_string(method, uri, ms, nonce, bytes.as_bytes()).as_bytes()));
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("x-s3-auth", format!("{id}:{ms}:{nonce}:{sig}"))
+        .header("content-type", "application/json")
+        .body(Body::from(bytes))
+        .unwrap()
+}
+
+async fn send(t: &T, req: Request<Body>) -> (StatusCode, Value) {
+    let resp = t.app.clone().oneshot(req).await.unwrap();
+    let s = resp.status();
+    let b = resp.into_body().collect().await.unwrap().to_bytes();
+    (s, serde_json::from_slice(&b).unwrap_or(Value::Null))
+}
+
+#[tokio::test]
+async fn signed_requests_replays_and_clocks() {
+    let t = setup();
+    let tok = t.register(ID1, "ALICE").await;
+    let now = s3_scores::now_ms();
+    let body = || Some(json!({"game": "rally", "stage": 1}));
+    let n1 = "00112233445566778899aabbccddeeff";
+    let (s, v) = send(&t, signed("POST", "/v1/tickets", ID1, &tok, now, n1, body())).await;
+    assert_eq!(s, StatusCode::OK, "a signed request works: {v}");
+    let (s, _) = send(&t, signed("POST", "/v1/tickets", ID1, &tok, now, n1, body())).await;
+    assert_eq!(s, StatusCode::CONFLICT, "the same request twice is refused");
+    let (s, _) = send(&t, signed("POST", "/v1/tickets", ID1, &"f".repeat(64), now, "10112233445566778899aabbccddeeff", body())).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "signed with the wrong key");
+    // The body is covered by the signature: change it and the signature fails.
+    let mut req = signed("POST", "/v1/tickets", ID1, &tok, now, "20112233445566778899aabbccddeeff", body());
+    *req.body_mut() = Body::from(json!({"game": "rally", "stage": 9}).to_string());
+    assert_eq!(send(&t, req).await.0, StatusCode::UNAUTHORIZED, "a tampered body is refused");
+    // A clock 30 s out: allowed, but logged. An hour out: refused.
+    let (s, _) = send(&t, signed("POST", "/v1/tickets", ID1, &tok, now - 30_000, "30112233445566778899aabbccddeeff", body())).await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, _) = send(&t, signed("POST", "/v1/tickets", ID1, &tok, now - 3_600_000, "40112233445566778899aabbccddeeff", body())).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    // Someone claiming to be verified already: the header is stripped, so they aren't.
+    let forged = Request::builder()
+        .method("POST")
+        .uri("/v1/tickets")
+        .header("x-s3-verified-player", ID1)
+        .header("content-type", "application/json")
+        .body(Body::from(json!({"game": "rally", "stage": 1}).to_string()))
+        .unwrap();
+    assert_eq!(send(&t, forged).await.0, StatusCode::UNAUTHORIZED);
+    // The dashboard lists what happened.
+    use base64::Engine;
+    let auth = format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(format!("admin:{ADMIN}")));
+    let resp = t.app.clone().oneshot(Request::builder().uri("/admin").header("authorization", auth).body(Body::empty()).unwrap()).await.unwrap();
+    let html = String::from_utf8(resp.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap();
+    for kind in ["replay", "badsig", "skew"] {
+        assert!(html.contains(kind), "dashboard shows {kind}");
+    }
+}
+
+#[tokio::test]
+async fn the_browser_build_may_call_from_its_own_page_only() {
+    let t = setup();
+    let pre = |origin: &str| {
+        Request::builder()
+            .method("OPTIONS")
+            .uri("/v1/tickets")
+            .header("origin", origin)
+            .header("access-control-request-method", "POST")
+            .body(Body::empty())
+            .unwrap()
+    };
+    let ok = t.app.clone().oneshot(pre("https://example.test")).await.unwrap();
+    assert_eq!(ok.headers().get("access-control-allow-origin").unwrap(), "https://example.test");
+    let other = t.app.clone().oneshot(pre("https://evil.test")).await.unwrap();
+    assert!(other.headers().get("access-control-allow-origin").is_none());
+}
+
+#[tokio::test]
+async fn feedback_is_kept_and_safe_to_publish() {
+    let t = setup();
+    let (s, _) = t.call("POST", "/v1/feedback", None, Some(json!({"game": "s3", "text": "The ice stage is too hard", "build": "V2.2.0"}))).await;
+    assert_eq!(s, StatusCode::CREATED, "anyone can send feedback");
+    let (s, _) = t.call("POST", "/v1/feedback", None, Some(json!({"game": "nosuch", "text": "hello there"}))).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let (s, _) = t.call("POST", "/v1/feedback", None, Some(json!({"game": "rally", "text": " a "}))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let mut last = StatusCode::CREATED;
+    for _ in 0..6 {
+        last = t.call("POST", "/v1/feedback", None, Some(json!({"game": "rally", "text": "more more more"}))).await.0;
+    }
+    assert_eq!(last, StatusCode::TOO_MANY_REQUESTS, "five an hour from one place");
+    // What would go to GitHub: no mentions in the title, the words fenced off.
+    let v = s3_scores::issue_json(7, "rally", "V2.2.0", "ALICE (3F2B8C1E)", "@everyone see [this](http://x) ````\n```js\nalert(1)");
+    let title = v["title"].as_str().unwrap();
+    assert!(!title.contains('@'), "{title}");
+    let body = v["body"].as_str().unwrap();
+    assert!(body.contains("````text\n@everyone"), "{body}");
+    assert_eq!(body.matches("````").count(), 2, "the player can't close the fence: {body}");
 }

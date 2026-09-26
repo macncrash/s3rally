@@ -121,6 +121,38 @@ async fn dashboard(State(st): State<Shared>, headers: HeaderMap) -> Response {
         review = "<tr><td colspan=6>Nothing waiting.</td></tr>".into();
     }
 
+    let mut fb = String::new();
+    if let Ok(mut q) = db.prepare(
+        "SELECT f.game, f.build, f.text, f.issue_url, f.at, COALESCE(p.name, '') FROM feedback f LEFT JOIN players p ON p.id = f.player ORDER BY f.at DESC LIMIT 30",
+    ) {
+        if let Ok(it) = q.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<String>>(3)?, r.get::<_, i64>(4)?, r.get::<_, String>(5)?))
+        }) {
+            for (game, build, text, url, at, name) in it.flatten() {
+                let link = url.filter(|u| u.starts_with("https://github.com/")).map(|u| format!("<a href=\"{}\">issue</a>", esc(&u))).unwrap_or_default();
+                fb += &format!(
+                    "<tr><td>{}<br><small>{}</small></td><td class=pre>{}</td><td>{}</td><td>{} {}</td></tr>",
+                    esc(&game), esc(&build), esc(&text), if name.is_empty() { "anonymous".into() } else { esc(&name) }, ago(Some(at), now), link
+                );
+            }
+        }
+    }
+    if fb.is_empty() {
+        fb = "<tr><td colspan=4>No feedback yet.</td></tr>".into();
+    }
+    let mut sec = String::new();
+    if let Ok(mut q) = db.prepare("SELECT kind, COALESCE(player, ''), detail, at FROM auth_events ORDER BY at DESC LIMIT 30") {
+        if let Ok(it) = q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?))) {
+            for (kind, player, detail, at) in it.flatten() {
+                let short: String = player.chars().take(8).collect();
+                sec += &format!("<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>", esc(&kind), esc(&short.to_uppercase()), esc(&detail), ago(Some(at), now));
+            }
+        }
+    }
+    if sec.is_empty() {
+        sec = "<tr><td colspan=4>Nothing unusual.</td></tr>".into();
+    }
+
     Html(format!(
         r#"<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>S3 Scores</title>
@@ -137,7 +169,7 @@ table{{border-collapse:collapse;width:100%;min-width:760px}} th,td{{padding:8px 
 th{{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}} .n{{text-align:right;font-variant-numeric:tabular-nums}}
 small{{color:var(--muted)}} .bar{{height:6px;background:var(--accent);margin-bottom:2px;min-width:1px}}
 .tag{{font-size:11px;padding:1px 6px;border:1px solid var(--muted);color:var(--muted)}} .tag.warn{{border-color:var(--accent);color:var(--accent)}}
-form{{display:inline}} button{{font:inherit;padding:4px 10px;cursor:pointer}}
+.pre{{white-space:pre-wrap;max-width:48ch}} form{{display:inline}} button{{font:inherit;padding:4px 10px;cursor:pointer}}
 </style>
 <main>
 <h1>S3 Scores</h1>
@@ -148,6 +180,12 @@ form{{display:inline}} button{{font:inherit;padding:4px 10px;cursor:pointer}}
 <section><h2>Runs waiting for review</h2><div class=wrap><table>
 <tr><th>Player</th><th>Game / stage</th><th class=n>Score</th><th>Why</th><th>Handed in</th><th></th></tr>
 {review}</table></div></section>
+<section><h2>Feedback</h2><div class=wrap><table>
+<tr><th>Game</th><th>What they said</th><th>From</th><th>When</th></tr>
+{fb}</table></div></section>
+<section><h2>Security log</h2><div class=wrap><table>
+<tr><th>What</th><th>Player</th><th>Detail</th><th>When</th></tr>
+{sec}</table></div><p><small>skew: the game's clock differed from ours by over 10 s (logged, allowed up to 15 min). replay: a signed request sent a second time (refused). badsig: a signature that didn't match (refused).</small></p></section>
 </main>"#,
         games = stats.len()
     ))

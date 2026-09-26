@@ -46,6 +46,15 @@ pub struct Config {
     pub verifier: Option<PathBuf>,
     pub games: Vec<GameInfo>,
     pub trust_proxy: bool,  // take the client address from X-Forwarded-For (behind a TLS proxy only)
+    pub require_signed: bool,       // refuse bearer tokens: every signed-in call must be a signed request
+    pub cors_origins: Vec<String>,  // web pages allowed to call the API (the browser build)
+    pub github: Option<GitHub>,     // feedback also opens an issue here
+}
+
+#[derive(Clone, Debug)]
+pub struct GitHub {
+    pub repo: String,   // owner/name
+    pub token: String,  // fine-grained, issues: write on that repo only
 }
 
 /// Games file: one per line, `slug time|points verify|review Title words`.
@@ -73,6 +82,7 @@ pub struct AppState {
     pub cfg: Config,
     pub db: Mutex<Connection>,
     limits: Mutex<HashMap<String, (i64, u32)>>,
+    nonces: Mutex<HashMap<String, i64>>,
     verifying: Semaphore,
 }
 
@@ -84,7 +94,7 @@ pub fn now_ms() -> i64 {
 
 pub fn state(cfg: Config) -> Result<Shared, String> {
     let db = db::open(&cfg.db_path).map_err(|e| format!("database: {e}"))?;
-    Ok(Arc::new(AppState { cfg, db: Mutex::new(db), limits: Mutex::new(HashMap::new()), verifying: Semaphore::new(2) }))
+    Ok(Arc::new(AppState { cfg, db: Mutex::new(db), limits: Mutex::new(HashMap::new()), nonces: Mutex::new(HashMap::new()), verifying: Semaphore::new(2) }))
 }
 
 pub fn router(st: Shared) -> Router {
@@ -97,9 +107,142 @@ pub fn router(st: Shared) -> Router {
         .route("/v1/plays", post(play))
         .route("/v1/ratings/{game}", put(rate))
         .route("/v1/stats", get(stats))
+        .route("/v1/feedback", post(feedback))
         .route("/healthz", get(|| async { "ok" }))
         .layer(DefaultBodyLimit::max(16 * 1024));
-    api.merge(admin::routes()).layer(middleware::from_fn_with_state(st.clone(), client_addr)).with_state(st)
+    // Outermost first: the client's address, then CORS, then the signature check.
+    api.merge(admin::routes())
+        .layer(middleware::from_fn_with_state(st.clone(), signed_requests))
+        .layer(middleware::from_fn_with_state(st.clone(), cors))
+        .layer(middleware::from_fn_with_state(st.clone(), client_addr))
+        .with_state(st)
+}
+
+// ---------------------------------------------------------------- signed requests
+//
+// A signed-in game signs every call instead of sending its token:
+//
+//   X-S3-Auth: <player id>:<unix ms>:<nonce, 32 hex>:<signature, 64 hex>
+//   signature = HMAC-SHA256(key = SHA-256(token),
+//                           METHOD \n PATH \n ms \n nonce \n hex(SHA-256(body)))
+//
+// The token itself never travels again after sign-up, a copied request can't be
+// sent twice (the nonce), and a stale one is refused. The server keeps
+// SHA-256(token), which is exactly the key. Clock differences over 10 s are
+// logged, not refused (the player's clock may just be wrong); past 15 min the
+// request is refused, because that is how long nonces are remembered.
+
+const VERIFIED: &str = "x-s3-verified-player";
+const SKEW_LOG_MS: i64 = 10_000;
+const SKEW_MAX_MS: i64 = 15 * 60_000;
+
+pub fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
+    let mut k = [0u8; 64];
+    if key.len() > 64 {
+        k[..32].copy_from_slice(&Sha256::digest(key));
+    } else {
+        k[..key.len()].copy_from_slice(key);
+    }
+    let (mut ipad, mut opad) = ([0u8; 64], [0u8; 64]);
+    for i in 0..64 {
+        ipad[i] = k[i] ^ 0x36;
+        opad[i] = k[i] ^ 0x5c;
+    }
+    let inner = Sha256::new().chain_update(ipad).chain_update(data).finalize();
+    Sha256::new().chain_update(opad).chain_update(inner).finalize().into()
+}
+
+/// What a request's signature covers.
+pub fn signing_string(method: &str, path: &str, ms: i64, nonce: &str, body: &[u8]) -> String {
+    format!("{method}\n{path}\n{ms}\n{nonce}\n{}", hex::encode(Sha256::digest(body)))
+}
+
+fn log_auth(st: &AppState, player: &str, kind: &str, detail: String) {
+    let db = st.db.lock().unwrap();
+    let _ = db.execute(
+        "INSERT INTO auth_events (player, kind, detail, at) VALUES (?1, ?2, ?3, ?4)",
+        params![player.chars().take(36).collect::<String>(), kind, detail, now_ms()],
+    );
+    let _ = db.execute("DELETE FROM auth_events WHERE at < ?1", params![now_ms() - 90 * 86_400_000]);
+}
+
+async fn signed_requests(State(st): State<Shared>, Extension(addr): Extension<ClientAddr>, req: Request, next: Next) -> Response {
+    let (mut parts, body) = req.into_parts();
+    parts.headers.remove(VERIFIED);  // only this layer may say who is signed in
+    let Some(auth) = parts.headers.get("x-s3-auth").and_then(|v| v.to_str().ok()).map(str::to_owned) else {
+        return next.run(Request::from_parts(parts, body)).await;
+    };
+    let deny = |code: StatusCode, msg: &'static str| ApiError(code, msg).into_response();
+    let f: Vec<&str> = auth.split(':').collect();
+    let (Some(&id), Some(ms), Some(&nonce), Some(&sig)) = (f.first(), f.get(1).and_then(|m| m.parse::<i64>().ok()), f.get(2), f.get(3)) else {
+        return deny(StatusCode::UNAUTHORIZED, "bad signature header");
+    };
+    if f.len() != 4 || !valid_uuid(id) || nonce.len() != 32 || sig.len() != 64 || !nonce.bytes().chain(sig.bytes()).all(|b| b.is_ascii_hexdigit()) {
+        return deny(StatusCode::UNAUTHORIZED, "bad signature header");
+    }
+    if !st.allow(format!("sig:{}", addr.0), 600, 60_000) {
+        return deny(StatusCode::TOO_MANY_REQUESTS, "slow down");
+    }
+    let Ok(bytes) = axum::body::to_bytes(body, 800 * 1024).await else {
+        return deny(StatusCode::PAYLOAD_TOO_LARGE, "too big");
+    };
+    let key: Option<Vec<u8>> = {
+        let db = st.db.lock().unwrap();
+        db.query_row("SELECT token_hash FROM players WHERE id = ?1", params![id], |r| r.get(0)).optional().ok().flatten()
+    };
+    let Some(key) = key else { return deny(StatusCode::UNAUTHORIZED, "unknown player") };
+    let path = parts.uri.path_and_query().map(|p| p.as_str()).unwrap_or("/");
+    let want = hmac_sha256(&key, signing_string(parts.method.as_str(), path, ms, nonce, &bytes).as_bytes());
+    let given = hex::decode(sig).unwrap_or_default();
+    if given.len() != 32 || !bool::from(subtle::ConstantTimeEq::ct_eq(&want[..], &given[..])) {
+        log_auth(&st, id, "badsig", format!("{} {}", parts.method, path.chars().take(60).collect::<String>()));
+        return deny(StatusCode::UNAUTHORIZED, "bad signature");
+    }
+    let now = now_ms();
+    let skew = now - ms;
+    if skew.abs() > SKEW_MAX_MS {
+        log_auth(&st, id, "skew", format!("{} s, refused", skew / 1000));
+        return deny(StatusCode::UNAUTHORIZED, "your clock is too far off");
+    }
+    {
+        let mut seen = st.nonces.lock().unwrap();
+        seen.retain(|_, at| now - *at < SKEW_MAX_MS * 2);
+        if seen.insert(format!("{id}:{nonce}"), now).is_some() {
+            drop(seen);
+            log_auth(&st, id, "replay", format!("{} {}", parts.method, path.chars().take(60).collect::<String>()));
+            return deny(StatusCode::CONFLICT, "this request was already used");
+        }
+    }
+    if skew.abs() > SKEW_LOG_MS {
+        log_auth(&st, id, "skew", format!("{:.1} s", skew as f64 / 1000.0));
+    }
+    parts.headers.insert(VERIFIED, id.parse().unwrap());
+    next.run(Request::from_parts(parts, axum::body::Body::from(bytes))).await
+}
+
+// ---------------------------------------------------------------- the browser build
+
+async fn cors(State(st): State<Shared>, req: Request, next: Next) -> Response {
+    let origin = req.headers().get("origin").and_then(|v| v.to_str().ok()).map(str::to_owned);
+    let allowed = origin.filter(|o| st.cfg.cors_origins.iter().any(|a| a == o));
+    if req.method() == axum::http::Method::OPTIONS {
+        let mut r = StatusCode::NO_CONTENT.into_response();
+        if let Some(o) = &allowed {
+            let h = r.headers_mut();
+            h.insert("access-control-allow-origin", o.parse().unwrap());
+            h.insert("access-control-allow-methods", "GET, POST, PUT, DELETE".parse().unwrap());
+            h.insert("access-control-allow-headers", "content-type, x-s3-auth".parse().unwrap());
+            h.insert("access-control-max-age", "600".parse().unwrap());
+            h.insert("vary", "origin".parse().unwrap());
+        }
+        return r;
+    }
+    let mut r = next.run(req).await;
+    if let Some(o) = allowed {
+        r.headers_mut().insert("access-control-allow-origin", o.parse().unwrap());
+        r.headers_mut().insert("vary", "origin".parse().unwrap());
+    }
+    r
 }
 
 // ---------------------------------------------------------------- plumbing
@@ -178,8 +321,26 @@ fn token_hash(token: &str) -> Vec<u8> {
     Sha256::digest(token.as_bytes()).to_vec()
 }
 
-/// The player behind the bearer token, or 401.
+/// The player behind a signed request (checked by `signed_requests`), or a bearer token; else 401.
 fn authed(st: &AppState, headers: &HeaderMap) -> ApiResult<db::Player> {
+    if let Some(id) = headers.get(VERIFIED).and_then(|v| v.to_str().ok()) {
+        let db = st.db.lock().unwrap();
+        let now = now_ms();
+        let p = db
+            .query_row("SELECT id, name FROM players WHERE id = ?1", params![id], |r| Ok(db::Player { id: r.get(0)?, name: r.get(1)? }))
+            .optional()
+            .map_err(internal)?
+            .ok_or(ApiError(StatusCode::UNAUTHORIZED, "unknown player"))?;
+        db.execute("UPDATE players SET last_seen = ?1 WHERE id = ?2", params![now, p.id]).map_err(internal)?;
+        drop(db);
+        if !st.allow(format!("p:{}", p.id), 240, 60_000) {
+            return Err(ApiError(StatusCode::TOO_MANY_REQUESTS, "slow down"));
+        }
+        return Ok(p);
+    }
+    if st.cfg.require_signed {
+        return Err(ApiError(StatusCode::UNAUTHORIZED, "sign your requests"));
+    }
     let token = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
@@ -476,4 +637,104 @@ async fn stats(State(st): State<Shared>) -> ApiResult<impl IntoResponse> {
         })
         .collect();
     Ok(([("cache-control", "public, max-age=600")], Json(json!({ "generated": now_ms(), "games": games }))))
+}
+
+// ---------------------------------------------------------------- feedback
+
+#[derive(Deserialize)]
+struct FeedbackBody {
+    game: String,
+    text: String,
+    build: Option<String>,
+}
+
+/// Anyone can send feedback (signed-in players get their name on it). It is kept
+/// for the dashboard and, when the server has a GitHub token, opened as an issue.
+async fn feedback(
+    State(st): State<Shared>,
+    Extension(addr): Extension<ClientAddr>,
+    headers: HeaderMap,
+    Json(b): Json<FeedbackBody>,
+) -> ApiResult<impl IntoResponse> {
+    let player = if headers.contains_key(VERIFIED) || headers.contains_key("authorization") { Some(authed(&st, &headers)?) } else { None };
+    let who = player.as_ref().map(|p| p.id.clone()).unwrap_or_else(|| addr.0.clone());
+    if !st.allow(format!("fb:{who}"), 5, 3_600_000) {
+        return Err(ApiError(StatusCode::TOO_MANY_REQUESTS, "thanks, that's enough for now"));
+    }
+    if !(b.game == "s3" || st.game(&b.game).is_some()) {
+        return Err(ApiError(StatusCode::NOT_FOUND, "unknown game"));
+    }
+    let text: String = b.text.trim().chars().map(|c| if c.is_control() && c != '\n' { ' ' } else { c }).take(2000).collect();
+    if text.chars().filter(|c| !c.is_whitespace()).count() < 3 {
+        return Err(ApiError(StatusCode::BAD_REQUEST, "say a little more"));
+    }
+    let build: String = b.build.unwrap_or_default().chars().filter(|c| c.is_ascii_graphic() || *c == ' ').take(40).collect();
+    let id = {
+        let db = st.db.lock().unwrap();
+        db.execute(
+            "INSERT INTO feedback (player, game, build, text, at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![player.as_ref().map(|p| &p.id), b.game, build, text, now_ms()],
+        )
+        .map_err(internal)?;
+        db.last_insert_rowid()
+    };
+    if let Some(gh) = st.cfg.github.clone() {
+        let st2 = st.clone();
+        let from = player.map(|p| format!("{} ({})", p.name, &p.id[..8].to_uppercase())).unwrap_or_else(|| "anonymous".into());
+        tokio::spawn(async move {
+            match open_issue(&gh, id, &b.game, &build, &from, &text).await {
+                Ok(url) => {
+                    let db = st2.db.lock().unwrap();
+                    let _ = db.execute("UPDATE feedback SET issue_url = ?1 WHERE id = ?2", params![url, id]);
+                }
+                Err(e) => eprintln!("s3-scores: feedback #{id} not sent to GitHub: {e}"),
+            }
+        });
+    }
+    Ok((StatusCode::CREATED, Json(json!({ "received": true }))))
+}
+
+/// The issue: the player's words in a code block (so nothing in them is read as
+/// markdown, links or @mentions), with the game, the build and who sent it.
+pub fn issue_json(id: i64, game: &str, build: &str, from: &str, text: &str) -> serde_json::Value {
+    let first: String = text.lines().next().unwrap_or("").chars().filter(|c| *c != '@').take(60).collect();
+    let fenced = text.replace("````", "'''");
+    json!({
+        "title": format!("Feedback ({game}): {first}"),
+        "body": format!("**Game:** `{game}` · **Build:** `{build}` · **From:** {from}\n\n````text\n{fenced}\n````\n\n_Sent from the S3 feedback screen (feedback #{id})._"),
+        "labels": ["feedback"],
+    })
+}
+
+async fn open_issue(gh: &GitHub, id: i64, game: &str, build: &str, from: &str, text: &str) -> Result<String, String> {
+    let ok = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b));
+    let Some((owner, name)) = gh.repo.split_once('/').filter(|(o, n)| ok(o) && ok(n)) else { return Err("bad repo".into()) };
+    let body = issue_json(id, game, build, from, text).to_string();
+    let mut raw = [0u8; 12];
+    rand::rngs::OsRng.fill_bytes(&mut raw);
+    let path = std::env::temp_dir().join(format!("s3-issue-{}.json", hex::encode(raw)));
+    tokio::fs::write(&path, body).await.map_err(|e| e.to_string())?;
+    // The token goes in on stdin, never on the command line.
+    let mut child = tokio::process::Command::new("curl")
+        .args(["-sS", "--max-time", "20", "--proto", "=https", "-X", "POST", "-H", "@-", "--data-binary"])
+        .arg(format!("@{}", path.display()))
+        .arg(format!("https://api.github.com/repos/{owner}/{name}/issues"))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    if let Some(mut stdin) = child.stdin.take() {
+        use tokio::io::AsyncWriteExt;
+        let headers = format!(
+            "Authorization: Bearer {}\nAccept: application/vnd.github+json\nX-GitHub-Api-Version: 2022-11-28\nUser-Agent: s3-scores\nContent-Type: application/json\n",
+            gh.token
+        );
+        stdin.write_all(headers.as_bytes()).await.map_err(|e| e.to_string())?;
+    }
+    let out = tokio::time::timeout(Duration::from_secs(30), child.wait_with_output()).await;
+    let _ = tokio::fs::remove_file(&path).await;
+    let out = out.map_err(|_| "timed out".to_string())?.map_err(|e| e.to_string())?;
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|_| "unreadable reply".to_string())?;
+    v["html_url"].as_str().map(str::to_owned).ok_or_else(|| v["message"].as_str().unwrap_or("no issue made").to_string())
 }

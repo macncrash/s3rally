@@ -27,6 +27,7 @@
 #include "multicart.h"
 #include "rc/game.h"
 #include "console/score.h"
+#include "console/sha256.h"
 #include "rc32/rally32.h"
 #include "trailer.h"
 #include "version.h"
@@ -422,6 +423,10 @@ static int scoreTest() {
         std::printf("%s %s\n", ok ? "ok  " : "FAIL", what.c_str());
         fails += !ok;
     };
+    // The signing maths against published test vectors (FIPS 180-2, RFC 4231 case 2).
+    check(gs::toHex(gs::sha256("abc")) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "SHA-256 test vector");
+    check(gs::toHex(gs::hmacSha256("Jefe", "what do ya want for nothing?")) == "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843",
+          "HMAC-SHA256 test vector");
     check(sc && sc->enabled(), "a server is set: " + gs::scoreServerUrl());
     if (!sc || !sc->enabled()) return 1;
     sc->registerPlayer(cart->profile().id, "TESTER");
@@ -469,6 +474,14 @@ static int scoreTest() {
     sc->play(true, 30);
     sc->wait();
     check(sc->error.empty() || sc->error == "ID ALREADY REGISTERED", "rated the game and reported a play");
+    sc->feedback("rally", "The Norway ice stages need more grip.\nOtherwise great!", "score-test");
+    sc->wait();
+    check(sc->feedbackStatus == "sent", "feedback sent (" + sc->feedbackStatus + ")");
+    sc->fetchStats();
+    sc->wait();
+    bool seen = false;
+    for (const gs::GameStat& g : sc->stats) seen |= g.game == "rally" && g.up == 1 && g.plays7 >= 1;
+    check(seen, "stats show the play and the thumbs up");
     std::printf("\n%s\n", fails ? "SCORE TEST FAILED" : "SCORE TEST OK");
     return fails ? 1 : 0;
 }

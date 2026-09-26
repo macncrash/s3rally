@@ -1,0 +1,14 @@
+.git
+.github
+build
+build-web
+s3
+server/target
+*.db
+*.db-*
+.env
+.env.*
+reports
+docs
+web
+tools

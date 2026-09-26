@@ -105,7 +105,7 @@ made-up times don't get on. After uploading you see the stage's top ten and wher
 Registered players also count as plays and can give a game a thumbs up or down; a dashboard shows
 which games are played and which have gone quiet. It's all off unless a server is set
 (`S3_SCORE_URL`). The server, its trust model and how to run it are in
-**[server/README.md](server/README.md)**. Desktop builds only for now.
+**[server/README.md](server/README.md)**, and deploying it in **[server/DEPLOY.md](server/DEPLOY.md)**. The s3 launcher sorts its library by popularity or rating (V), and SPACE gives the selected game a thumbs up or down, or sends feedback.
 
 ## S3 RUN
 
