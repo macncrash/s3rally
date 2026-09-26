@@ -13,6 +13,8 @@
 
 🧊 **[Play (3) RALLY 32 on the S3-32](https://macncrash.github.io/s3rally/32/)**, the 32-bit version in real 3D.
 
+🚀 **[Play (3) RALLY 64 on the S3-64](https://macncrash.github.io/s3rally/64/)**, a preview of the 64-bit machine: 640×480, depth buffer, textures that stay put.
+
 </div>
 
 ---
@@ -83,7 +85,16 @@ cartridge, **(3) RALLY 32**, drives the same fifteen stages with the same car ph
 and scenery in real 3D. The road has the shape of the land, and the car is lit
 polygons. Pick it from the multi-cart menu, or run `./s3 --cart rally32`. The
 design and the plan for hosting many consoles on one engine are in
-**[docs/S3-32.md](docs/S3-32.md)**.
+**[docs/S3-32-64.md](docs/S3-32-64.md)**.
+
+## (3) RALLY 64: the S3-64 preview
+
+The same cartridge on the next board. The S3-64 is a revision of the same GPU that
+fixes what the 32-bit generation faked: a per-pixel depth buffer instead of
+sorting whole polygons, perspective-correct textures that no longer swim,
+bilinear filtering with mipmaps so distant gravel doesn't shimmer, and 640×480
+in 24-bit colour. It draws the screen in bands on parallel pipelines. Run
+`./s3 --cart rally64`, or pick it from the multi-cart.
 
 ## S3 RUN
 
@@ -258,8 +269,8 @@ src/rc/        (3) RALLY: course (venues, stages, pace notes) · car (physics)
                carmodel (3D car sprites) · art · voice (co-driver) · game · drive · render · online
 src/game/      S3 RUN: rally (game, physics, AI, HUD) · stages · art · sound
                shared by both: radio (songs + sequencer) · profile · versus (network sessions)
-src/g32/       S3-32: gpu (polygons, ordering table, fog, dithering) · gte (camera, clipping)
-src/rc32/      (3) RALLY 32: the rally in 3D on the S3-32
+src/g32/       S3-32 and S3-64: gpu (polygons, ordering table, depth buffer, filtering, fog, dithering) · gte (camera, clipping)
+src/rc32/      (3) RALLY 32 and 64: the rally in 3D on the S3-32 and S3-64
 src/           main · multicart (the menu) · multi (several consoles in one process)
 ```
 

@@ -1,5 +1,7 @@
 #include "rally32.h"
 
+#include <chrono>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -336,8 +338,8 @@ bool Rally32::video(const uint32_t*& px, int& w, int& h) {
     scene();
     hud();
     px = gpu_.draw();
-    w = g32::W;
-    h = g32::H;
+    w = gpu_.width();
+    h = gpu_.height();
     return true;
 }
 
@@ -542,9 +544,9 @@ void Rally32::hud() {
     if (mode_ == Mode::Title) {
         const float w = 250, h = w * gpu_.texH(logo_) / gpu_.texW(logo_);
         gpu_.sprite(160 - w / 2, 34, w, h, logo_, 0, 0, float(gpu_.texW(logo_)), float(gpu_.texH(logo_)));
-        text("S3-32 PREVIEW", 160, 150, 1.4f, white);
+        text(is64() ? "S3-64 PREVIEW" : "S3-32 PREVIEW", 160, 150, 1.4f, white);
         if (t_ % 60 < 40) text("PRESS START", 160, 176, 2, yellow);
-        text("REAL 3D ON THE 32-BIT MACHINE", 160, 206, 1, white);
+        text(is64() ? "640X480  DEPTH BUFFER  FILTERED TEXTURES" : "REAL 3D ON THE 32-BIT MACHINE", 160, 206, 1, white);
         text(S3_VERSION_STRING, 316, 228, 1, white, 1);
         return;
     }
@@ -584,7 +586,7 @@ float Rally32::simulate(int stage, int frames, std::vector<std::string>* shots, 
         sys_->step();
         if (shots && (f == 60 * 8 || f == 60 * 30)) {
             sys_->render();
-            const std::string p = dir + "/g32-stage" + std::to_string(stage) + "-" + std::to_string(f / 60) + ".png";
+            const std::string p = dir + (is64() ? "/g64-stage" : "/g32-stage") + std::to_string(stage) + "-" + std::to_string(f / 60) + ".png";
             if (sys_->saveScreenshot(p)) shots->push_back(p);
         }
     }
@@ -650,6 +652,28 @@ void Rally32::cockpitHud() {
     poly({{cx + std::cos(ts - 0.05f) * 60, cy + std::sin(ts - 0.05f) * 60}, {cx + std::cos(ts - 0.05f) * 70, cy + std::sin(ts - 0.05f) * 70},
           {cx + std::cos(ts + 0.05f) * 70, cy + std::sin(ts + 0.05f) * 70}, {cx + std::cos(ts + 0.05f) * 60, cy + std::sin(ts + 0.05f) * 60}},
          128, 100, 0, 0.05f);
+}
+
+}  // namespace rc32
+
+namespace rc32 {
+
+double Rally32::benchmark(int frames) {
+    loadStage(0);
+    attract_ = false;
+    mode_ = Mode::Drive;
+    t_ = 0;
+    for (int f = 0; f < 60 * 5; f++) sys_->step();  // up to speed first
+    std::vector<double> ms;
+    for (int f = 0; f < frames && mode_ == Mode::Drive; f++) {
+        const auto t0 = std::chrono::steady_clock::now();
+        sys_->step();
+        sys_->render();
+        ms.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+    }
+    if (ms.empty()) return 0;
+    std::nth_element(ms.begin(), ms.begin() + long(ms.size() / 2), ms.end());
+    return ms[ms.size() / 2];
 }
 
 }  // namespace rc32

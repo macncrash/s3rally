@@ -53,6 +53,7 @@ bool polygon(GPU& gpu, const Camera& cam, const WVtx* v, int n, int tex, Blend b
         s[i].x = cam.cx + c.p.x * k;
         s[i].y = cam.cy - c.p.y * k;
         s[i].u = c.u, s[i].v = c.v;
+        s[i].z = c.p.z;
         s[i].r = uint8_t(std::clamp(c.r, 0.0f, 255.0f)), s[i].g = uint8_t(std::clamp(c.g, 0.0f, 255.0f)), s[i].b = uint8_t(std::clamp(c.b, 0.0f, 255.0f));
         s[i].fog = std::clamp((c.p.z - cam.fogNear) / (cam.fogFar - cam.fogNear), 0.0f, 1.0f);
         depth += c.p.z;

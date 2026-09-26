@@ -15,11 +15,13 @@ struct Entry {
     const char* line1;
     const char* line2;
 };
-const Entry GAMES[3] = {
+const Entry GAMES[] = {
     {"(3) RALLY", "REAL RALLY: FIVE COUNTRIES, 15 STAGES", "JUMPS, MUD, SNOW, ICE. COCKPIT VIEW."},
     {"(3) RALLY 32", "S3-32 PREVIEW: THE SAME RALLY", "IN REAL 3D ON THE 32-BIT MACHINE."},
+    {"(3) RALLY 64", "S3-64 PREVIEW: 640X480, DEPTH BUFFER,", "TEXTURES THAT STAY PUT."},
     {"S3 RUN", "THE ORIGINAL ARCADE RACER", "BEAT THE CLOCK, PASS THE PACK."},
 };
+constexpr int N_GAMES = int(sizeof GAMES / sizeof GAMES[0]);
 }  // namespace
 
 MultiCart::MultiCart() = default;
@@ -58,7 +60,7 @@ void MultiCart::init(gs::System& sys) {
     v.B.scroll(0, 0);
     for (int y = 0; y < gs::SCREEN_H; y++) v.lineBackdrop[y] = gs::rgb4(0, 0, std::min(8, 2 + y / 32));
     const std::string last = sys.loadBlob("cart.txt");
-    sel_ = last == "run" ? 2 : last == "rally32" ? 1 : 0;
+    sel_ = last == "run" ? 3 : last == "rally64" ? 2 : last == "rally32" ? 1 : 0;
     t_ = 0;
 }
 
@@ -74,26 +76,26 @@ void MultiCart::draw(gs::System& sys) {
     };
     auto centre = [&](int row, const std::string& s, int pal) { put(20 - int(s.size()) / 2, row, s, pal); };
     centre(6, "MULTI-CART  -  CHOOSE A GAME", 0);
-    for (int i = 0; i < 3; i++) {
-        const int row = 9 + i * 5;
+    for (int i = 0; i < N_GAMES; i++) {
+        const int row = 8 + i * 4;
         const bool on = i == sel_;
         centre(row, (on ? "> " : "  ") + std::string(GAMES[i].name) + (on ? " <" : "  "), on ? 15 : 0);
-        centre(row + 2, GAMES[i].line1, 0);
-        centre(row + 3, GAMES[i].line2, 0);
+        centre(row + 1, GAMES[i].line1, 0);
+        centre(row + 2, GAMES[i].line2, 0);
     }
-    if (t_ % 60 < 40) centre(23, "PRESS START", 15);
-    centre(25, "ESC ON A TITLE SCREEN COMES BACK HERE", 0);
+    if (t_ % 60 < 40) centre(24, "PRESS START", 15);
+    centre(26, "ESC ON A TITLE SCREEN COMES BACK HERE", 0);
     put(39 - int(std::string(S3_VERSION_STRING).size()), 27, S3_VERSION_STRING, 0);
 }
 
 void MultiCart::frame(gs::System& sys) {
     t_++;
     gs::Pad& pad = sys.pad;
-    if (pad.pressed(gs::BTN_UP)) sel_ = (sel_ + 2) % 3;
-    if (pad.pressed(gs::BTN_DOWN)) sel_ = (sel_ + 1) % 3;
+    if (pad.pressed(gs::BTN_UP)) sel_ = (sel_ + N_GAMES - 1) % N_GAMES;
+    if (pad.pressed(gs::BTN_DOWN)) sel_ = (sel_ + 1) % N_GAMES;
     draw(sys);
     if (t_ > 10 && (pad.pressed(gs::BTN_START) || pad.pressed(gs::BTN_C))) {
-        sys.saveBlob("cart.txt", sel_ == 0 ? "rally" : sel_ == 1 ? "rally32" : "run");
+        sys.saveBlob("cart.txt", sel_ == 0 ? "rally" : sel_ == 1 ? "rally32" : sel_ == 2 ? "rally64" : "run");
         gs::Cart* c;
         if (sel_ == 0) {
             if (!champ_) champ_ = std::make_unique<rc::RallyChamp>();
@@ -101,6 +103,9 @@ void MultiCart::frame(gs::System& sys) {
         } else if (sel_ == 1) {
             if (!r32_) r32_ = std::make_unique<rc32::Rally32>();
             c = r32_.get();
+        } else if (sel_ == 2) {
+            if (!r64_) r64_ = std::make_unique<rc32::Rally32>(g32::Model::S3_64);
+            c = r64_.get();
         } else {
             if (!run_) run_ = std::make_unique<rally::Rally>();
             c = run_.get();

@@ -11,6 +11,10 @@
 #include <sstream>
 #include <vector>
 
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#endif
+
 #include "gfx.h"
 
 #ifdef __EMSCRIPTEN__
@@ -105,6 +109,31 @@ void System::powerOn(Cart& cart) {
     inBios_ = true;
 }
 
+namespace {
+
+// A reel asks a cartridge to film itself. The menu sets these and runs --sim.
+struct ReelCapture {
+    FILE* video = nullptr;
+    FILE* audio = nullptr;
+    int left = 0;
+    bool looked = false;
+};
+
+ReelCapture& reelCapture() {
+    static ReelCapture r;
+    return r;
+}
+
+void closeReel() {
+    ReelCapture& r = reelCapture();
+    if (r.video) std::fclose(r.video);
+    if (r.audio) std::fclose(r.audio);
+    r.video = r.audio = nullptr;
+    r.left = 0;
+}
+
+}  // namespace
+
 void System::step() {
     pad.latch();
     if (ejectPending_ && home_) {  // back to the menu between frames, never inside a cart's frame
@@ -117,10 +146,77 @@ void System::step() {
         cart_->frame(*this);
     }
     frame++;
+
+    ReelCapture& reel = reelCapture();
+    if (!reel.looked) {
+        reel.looked = true;
+        const char* video = std::getenv("S3_REEL_VIDEO");
+        const char* audio = std::getenv("S3_REEL_AUDIO");
+        const char* frames = std::getenv("S3_REEL_FRAMES");
+        if (video && audio && frames && std::atoi(frames) > 0) {
+            reel.video = std::fopen(video, "wb");
+            reel.audio = std::fopen(audio, "wb");
+            reel.left = std::atoi(frames);
+            if (!reel.video || !reel.audio) closeReel();
+            else apu.init(48000);
+        }
+    }
+    if (reel.left > 0 && reel.video && reel.audio) {
+        // Draw the S3-16 buffer here. System::render() asks the cartridge for its own
+        // picture, and a binary built before that hook existed has no slot for the call.
+        vdp.render(fb);
+        std::fwrite(fb, 4, size_t(SCREEN_W * SCREEN_H), reel.video);
+        float samples[800 * 2];
+        apu.render(samples, 800);
+        std::fwrite(samples, sizeof(float), size_t(800 * 2), reel.audio);
+        std::fflush(reel.video);
+        std::fflush(reel.audio);
+        if (--reel.left == 0) closeReel();
+    }
 }
 
+namespace {
+
+// video() is the virtual after frame(). A cartridge built before that hook has
+// no slot; the bytes there are the next typeinfo record, and calling them faults.
+bool videoSlotIsCode(Cart* cart) {
+#if defined(__APPLE__)
+    if (!cart) return false;
+    auto** vt = *reinterpret_cast<void***>(cart);
+    void* slot = vt ? vt[5] : nullptr;
+    if (!slot) return false;
+    vm_address_t addr = reinterpret_cast<vm_address_t>(slot);
+    vm_size_t size = 0;
+    vm_region_basic_info_data_64_t info{};
+    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t object = MACH_PORT_NULL;
+    const vm_address_t asked = addr;
+    if (vm_region_64(mach_task_self(), &addr, &size, VM_REGION_BASIC_INFO_64,
+                     reinterpret_cast<vm_region_info_t>(&info), &count, &object) != KERN_SUCCESS)
+        return false;
+    if (addr > asked || asked >= addr + size) return false;
+    return (info.protection & VM_PROT_EXECUTE) != 0;
+#else
+    (void)cart;
+    return true;
+#endif
+}
+
+}  // namespace
+
 void System::render() {
-    if (!inBios_ && cart_ && cart_->video(shown, shownW, shownH)) return;
+    if (!inBios_ && cart_ && videoSlotIsCode(cart_)) {
+        const uint32_t* px = nullptr;
+        int w = 0, h = 0;
+        using VideoFn = bool (*)(Cart*, const uint32_t*&, int&, int&);
+        auto** vt = *reinterpret_cast<void***>(cart_);
+        if (reinterpret_cast<VideoFn>(vt[5])(cart_, px, w, h) && px && w > 0 && h > 0) {
+            shown = px;
+            shownW = w;
+            shownH = h;
+            return;
+        }
+    }
     vdp.render(fb);
     shown = fb;
     shownW = SCREEN_W;
@@ -534,7 +630,13 @@ void System::biosInit() {
     bitmapToPlane(alloc, vdp.B, lx + (logo.w + 7) / 8 + 1, 14, textBitmap("16-BIT", {2, 5, 0, 0, 1}), 0);
     bitmapToPlane(alloc, vdp.B, 15, 20, textBitmap("S3 ENGINE", {1, 6, 0, 0, 1}), 0);
     bitmapToPlane(alloc, vdp.B, 14, 22, textBitmap("FROM MACNCRASH", {1, 6, 0, 0, 1}), 0);
+    bitmapToPlane(alloc, vdp.B, 13, 24, textBitmap("(C) 2026 MACNCRASH", {1, 6, 0, 0, 1}), 0);
     vdp.HUD.clear();
+}
+
+void System::setFullscreen(bool on) {
+    if (!win_) return;
+    SDL_SetWindowFullscreen(win_, on ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
 }
 
 bool System::biosStep() {

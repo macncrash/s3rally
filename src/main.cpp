@@ -65,23 +65,17 @@ static int simulateRally(const char* shotDir) {
     return failures ? 1 : 0;
 }
 
-// (3) RALLY 32 on the S3-32: the autopilot drives every stage in 3D, timing the GPU.
-static int simulate32(const char* shotDir) {
+// (3) RALLY 32 on the S3-32 (or 64 on the S3-64): the autopilot drives every stage in 3D, timing the GPU.
+static int simulate32(const char* shotDir, bool s64 = false) {
     gs::System sys(true);
-    auto cart = std::make_unique<rc32::Rally32>();
+    auto cart = std::make_unique<rc32::Rally32>(s64 ? g32::Model::S3_64 : g32::Model::S3_32);
     auto t0 = std::chrono::steady_clock::now();
     sys.bootCart(*cart);
-    std::printf("(3) RALLY 32 on the S3-32, headless\n");
-    std::printf("boot %.0f ms, texture RAM %.2f MB / 2 MB\n", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(),
-                cart->textureBytes() / 1048576.0);
-    for (int i = 0; i < 120; i++) sys.step();
-    t0 = std::chrono::steady_clock::now();
-    for (int i = 0; i < 60; i++) {
-        sys.step();
-        sys.render();
-    }
-    std::printf("frame (logic + 3D render) %.2f ms, %d triangles  (budget 16.7 ms)\n\n",
-                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count() / 60, cart->lastTriangles());
+    std::printf("%s on the %s, headless\n", cart->title(), s64 ? "S3-64" : "S3-32");
+    std::printf("boot %.0f ms, texture RAM %.2f MB / %d MB\n", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(),
+                cart->textureBytes() / 1048576.0, s64 ? 8 : 2);
+    const double med = cart->benchmark(300);
+    std::printf("frame (logic + 3D render, median while driving) %.2f ms, %d triangles  (budget 16.7 ms)\n\n", med, cart->lastTriangles());
     std::vector<std::string> shots;
     int fails = 0;
     for (int s = 0; s < rc::NUM_STAGES; s++) {
@@ -330,7 +324,7 @@ int main(int argc, char** argv) {
             return 0;
         }
         else if (!std::strcmp(argv[i], "--version")) {
-            std::printf("S3-16 MULTI-CART ((3) RALLY, S3 RUN) %s\n", S3_VERSION_STRING);
+            std::printf("S3 MULTI-CART ((3) RALLY, RALLY 32, RALLY 64, S3 RUN) %s\n", S3_VERSION_STRING);
             return 0;
         }
         else if (!std::strcmp(argv[i], "--record") && i + 2 < argc) {
@@ -345,15 +339,19 @@ int main(int argc, char** argv) {
     }
     if (sim) {
         int rc = 0;
-        if (cartName != "rally" && cartName != "rally32") {
+        if (cartName != "rally" && cartName != "rally32" && cartName != "rally64") {
             radioCheck(nullptr, 30);
             rc |= simulate(shots);
             std::printf("\n");
         }
-        if (cartName != "run" && cartName != "rally32") rc |= simulateRally(shots);
+        if (cartName != "run" && cartName != "rally32" && cartName != "rally64") rc |= simulateRally(shots);
         if (cartName == "rally32" || cartName.empty()) {
             std::printf("\n");
             rc |= simulate32(shots);
+        }
+        if (cartName == "rally64" || cartName.empty()) {
+            std::printf("\n");
+            rc |= simulate32(shots, true);
         }
         return rc;
     }
@@ -364,6 +362,7 @@ int main(int argc, char** argv) {
     if (cartName == "rally") direct = std::make_unique<rc::RallyChamp>();
     else if (cartName == "run") direct = std::make_unique<rally::Rally>();
     else if (cartName == "rally32") direct = std::make_unique<rc32::Rally32>();
+    else if (cartName == "rally64") direct = std::make_unique<rc32::Rally32>(g32::Model::S3_64);
     auto sys = std::make_unique<gs::System>();
     sys->setHome(*menu);
     return sys->run(direct ? *direct : *menu);
