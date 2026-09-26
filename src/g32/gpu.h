@@ -14,6 +14,7 @@
 // texture RAM. It draws the screen in horizontal bands on parallel pipelines.
 // Cartridges keep working in 320x240 coordinates; the 64 scales them up.
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
