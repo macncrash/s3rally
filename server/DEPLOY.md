@@ -1,6 +1,6 @@
 # Deploying s3-scores
 
-These are notes for ops. The service is one small container on the same box and network as the other
+These are notes for ops. `<shared-network>` is the Docker network the shared Caddy is on, and `/srv/s3-scores` stands for wherever the box keeps service data. The service is one small container on the same box and network as the other
 services behind the shared Caddy. It is set up like the other containers there: no published port,
 Caddy terminates TLS, and data lives on a host directory.
 
