@@ -202,7 +202,7 @@ std::string scoreServerUrl() {
 EM_JS_DEPS(s3net, "$stringToNewUTF8,$UTF8ToString");
 EM_JS(void, s3_fetch, (int id, const char* method, const char* url, const char* auth, const char* body), {
     Module.s3net = Module.s3net || {};
-    const slot = {done: false, code: 0, text: ''};
+    const slot = {done: false, code: 0, text: ""};
     Module.s3net[id] = slot;
     const headers = {'Content-Type': 'application/json'};
     const a = UTF8ToString(auth);
