@@ -221,7 +221,7 @@ void Car::driveStep(const Course& c, const CarInput& in, float dt, bool manual) 
     // Steering: faster hands on a keyboard, less lock at speed.
     // Keys are on or off: turn in progressively, let go quickly (self-centring).
     const bool centring = std::fabs(in.steer) < std::fabs(steerIn) || in.steer * steerIn < 0;
-    const float rate = in.analog ? 12.0f : centring ? 9.0f : 3.0f;
+    const float rate = in.analog ? 12.0f : centring ? 9.0f : in.arcade ? 6.0f : 3.0f;
     steerIn += clampf(in.steer - steerIn, -rate * dt, rate * dt);
     float lock = cs.steerMax / (1 + std::fabs(u) / 32);
     // Steering help (keyboard, or traction help on): full input asks for the tightest turn the tyres
@@ -322,6 +322,24 @@ void Car::driveStep(const Course& c, const CarInput& in, float dt, bool manual) 
     v += dv * dt * (0.2f + 0.8f * slowK);
     r += dr * dt * (0.2f + 0.8f * slowK);
     if (std::fabs(u) < 0.3f && std::fabs(drive) < 1 && brakeIn > 0.1f) u *= 0.8f;  // held on the brakes
+
+    // ARCADE handling, as in S3 RUN and SUNSET CRUISE: the car turns as the wheel asks, up to what
+    // the (generous) grip allows, so at the limit it runs wide instead of spinning. Hold the
+    // steering hard into a bend at speed, on the power or the handbrake, and the tail steps out
+    // while the car keeps its line: a drift that helps, costs a little speed and never spins.
+    // Jumps, surfaces, the verge, hits and damage stay as they are.
+    if (in.arcade && std::fabs(u) > 3 && state == CarState::Driving) {
+        const bool onRoad = std::fabs(x) < g.hw + 0.5f;
+        const bool drifting = onRoad && std::fabs(steerIn) > 0.55f && u > 14 && (in.handbrake || in.throttle > 0.5f);
+        const float rMax = mu * GRAV * 1.35f * (drifting ? 1.1f : 1.0f) / std::fabs(u);
+        const float rWant = clampf(u * std::tan(steerIn * cs.steerMax / (1 + std::fabs(u) / 40)) / L + pull, -rMax, rMax);
+        r += (rWant - r) * std::min(1.0f, dt * 6);
+        const float vWant = drifting ? u * std::tan(-sgn(steerIn) * 0.3f) : 0.0f;  // tail out: the car slides to the outside
+        v += (vWant - v) * std::min(1.0f, dt * (drifting ? 3.0f : 4.0f));
+        const float lim = std::fabs(u) * std::tan(0.6f);
+        v = clampf(v, -lim, lim);
+        if (drifting) u -= 1.2f * dt;
+    }
     axPrev_ = clampf(du - v * r, -12, 12);
 
     // Move along the road.
@@ -591,7 +609,7 @@ bool Car::restore(const Course& c, const CarSnapshot& sn) {
         if (std::fabs(f0[k]) > 500) return false;
     for (int k : {2, 9, 11, 13, 14, 16, 18, 19, 20, 21, 22, 23, 24, 27, 28, 29})  // angles and 0..1 amounts
         if (std::fabs(f0[k]) > 100) return false;
-    if (f0[15] < 0 || f0[15] > 20000 || f0[8] < 0 || f0[8] > 3600 || f0[17] < -1 || f0[17] > 10 || f0[25] < 0 || f0[25] > 3600) return false;
+    if (f0[15] < 0 || f0[15] > 20000 || f0[8] < 0 || f0[8] > 3600 || f0[17] < -1 || f0[17] > 10 || f0[25] < -60 || f0[25] > 3600) return false;  // (the state timer counts down from below zero in some states)
     const int32_t* i = sn.i;
     const int32_t air = i[0], gr = i[1], spin = i[2], punct = i[3], st = i[4], spec = i[5], rng = i[6], next = i[7], asst = i[8];
     if (air < 0 || air > 1 || gr < -1 || gr > 6 || gr == 0 || spin < 0 || spin > 1 || punct < -1 || punct > 1 || st < 0 || st > 3 ||

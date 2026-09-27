@@ -211,6 +211,7 @@ rc::CarInput Rally32::readPad() {
     in.throttle = std::max(p.down(gs::BTN_C) || p.down(gs::BTN_UP) ? 1.0f : 0.0f, p.accel);
     in.brake = std::max(p.down(gs::BTN_B) || p.down(gs::BTN_DOWN) ? 1.0f : 0.0f, p.brake);
     in.handbrake = p.down(gs::BTN_TURBO);
+    in.arcade = arcade_;
     return in;
 }
 
@@ -277,6 +278,7 @@ void Rally32::frame(gs::System& sys) {
                 car_.s += 150;
                 car_.u = 18;
             }
+            if (pad.pressed(gs::BTN_A)) arcade_ = !arcade_;  // V: arcade or simulation handling
             if (pad.pressed(gs::BTN_UP) || pad.pressed(gs::BTN_DOWN)) {
                 carId_ = (carId_ + 1) % rc::NUM_CARS;
                 std::copy(rc::carSpec(carId_).livery, rc::carSpec(carId_).livery + 16, livery_);
@@ -558,7 +560,8 @@ void Rally32::hud() {
         char buf[48];
         std::snprintf(buf, sizeof buf, "%.2f KM   %s", course_.stageMetres / 1000, rc::carSpec(carId_).name);
         text(buf, 160, 66, 1, white);
-        text("LEFT/RIGHT STAGE  UP/DOWN CAR  START GO", 160, 214, 1, white);
+        text(arcade_ ? "HANDLING: ARCADE" : "HANDLING: SIMULATION", 160, 84, 1, arcade_ ? yellow : white);
+        text("LEFT/RIGHT STAGE  UP/DOWN CAR  V HANDLING  START GO", 160, 214, 1, white);
         if (best_ > 0) text("BEST " + fmtTime(best_), 160, 196, 1, yellow);
         return;
     }

@@ -4,6 +4,7 @@
 rally    time verify (3) RALLY
 rally32  time verify (3) RALLY 32
 rally64  time verify (3) RALLY 64
+rallyarc time verify (3) RALLY ARCADE
 
 # The s3games titles (tools/s3games-list.sh). Scores wait for review until a title has a verifier.
 s3alley        points review S3 ALLEY
