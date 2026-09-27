@@ -366,6 +366,11 @@ static int replayTest() {
         r.damage.engine = -1;
         check(verdict(r) == rc::Verdict::Rejected, "impossible car condition: rejected");
     }
+    {
+        rc::Replay r = base;
+        for (size_t f = 1000; f < 1400; f++) r.inputs[f].event = rc::EV_CONTACT | rc::EV_PUSH;  // made-up pushes along
+        check(verdict(r) != rc::Verdict::Accepted, "made-up contacts: not accepted");
+    }
     // Damaged files: every truncation, and random byte changes, must be refused or verified without crashing.
     int refused = 0;
     for (size_t n = 0; n < sample.size(); n += 97) {
@@ -502,6 +507,45 @@ static int writeReplay(int stage, const char* path) {
     return 0;
 }
 
+// Arcade handling against the simulation: every stage with the autopilot and with a
+// clumsy keyboard driver (on/off keys, 0.2 s late), counting crashes; arcade replays
+// must verify on the arcade board.
+static int arcadeTest() {
+    int fails = 0;
+    for (int kb = 0; kb < 2; kb++)
+        for (int arc = 0; arc < 2; arc++) {
+            gs::System sys(true);
+            auto cart = std::make_unique<rc::RallyChamp>();
+            sys.bootCart(*cart);
+            cart->testArcade(arc);
+            cart->testKeyboardDriver(kb);
+            int done = 0, crashes = 0, verified = 0;
+            float total = 0;
+            for (int s = 0; s < rc::NUM_STAGES; s++) {
+                const auto r = cart->simulateStage(s, 0, nullptr, "");
+                done += r.finished;
+                crashes += r.crashes;
+                total += r.finished ? r.time : 0;
+                if (r.finished && cart->recorder().done()) {
+                    rc::Replay back;
+                    std::string why;
+                    if (rc::Replay::decode(cart->recorder().replay().encode(), back, why) && back.game == (arc ? "rallyarc" : "rally")) {
+                        const rc::VerifyResult v = rc::verifyReplay(back);
+                        // Accepted, or held for review because another crew touched us (which a replay can't prove).
+                        if (v.verdict == rc::Verdict::Accepted || (v.verdict == rc::Verdict::Review && v.reason.rfind("touched another crew", 0) == 0)) verified++;
+                        if (v.verdict != rc::Verdict::Accepted) std::printf("  stage %d: %s (%s)\n", s, v.verdict == rc::Verdict::Review ? "review" : "rejected", v.reason.c_str());
+                    }
+                }
+            }
+            std::printf("%-9s %-10s finished %2d/%d  crashes %3d  time %7.1f s  replays verified %2d\n", kb ? "keyboard" : "autopilot",
+                        arc ? "ARCADE" : "SIMULATION", done, rc::NUM_STAGES, crashes, double(total), verified);
+            fails += verified != done;
+            if (arc && !kb) fails += done != rc::NUM_STAGES;
+        }
+    std::printf("\n%s\n", fails ? "ARCADE TEST FAILED" : "ARCADE TEST OK");
+    return fails ? 1 : 0;
+}
+
 // The score server's check: replay a stage from FILE and print one line of JSON.
 // Exit 0 accepted, 1 review, 2 rejected. No window, no sound: only the rules.
 static int verifyRun(const char* path) {
@@ -560,6 +604,7 @@ int main(int argc, char** argv) {
         }
         else if (!std::strcmp(argv[i], "--verify-run") && i + 1 < argc) return verifyRun(argv[i + 1]);
         else if (!std::strcmp(argv[i], "--replay-test")) return replayTest();
+        else if (!std::strcmp(argv[i], "--arcade-test")) return arcadeTest();
         else if (!std::strcmp(argv[i], "--write-replay") && i + 2 < argc) return writeReplay(std::atoi(argv[i + 1]), argv[i + 2]);
         else if (!std::strcmp(argv[i], "--score-test")) return scoreTest();
         else if (!std::strcmp(argv[i], "--net-shots") && i + 1 < argc) return netShots(argv[i + 1]);

@@ -71,6 +71,7 @@ private:
     float camYaw_ = 0, camY_ = 0;
     float camRel_ = 0;  // chase camera heading relative to the road (as the 16-bit machine does it)
     int view_ = 0;  // 0 chase, 1 cockpit, 2 far chase (V or Z)
+    bool arcade_ = true;  // arcade handling (V on the stage screen), as in (3) RALLY
     void cockpitHud();
 };
 

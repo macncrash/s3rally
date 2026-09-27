@@ -9,9 +9,9 @@ namespace rc {
 namespace {
 constexpr float DT = 1.0f / 60;
 constexpr char MAGIC[4] = {'S', '3', 'R', 'P'};
-constexpr uint16_t VERSION = 1;
+constexpr uint16_t VERSION = 2;  // 2: a contact-event byte per input run (1 still reads, with none)
 
-enum : uint8_t { F_HANDBRAKE = 1, F_UP = 2, F_DOWN = 4, F_ANALOG = 8, F_ASSIST = 16 };
+enum : uint8_t { F_HANDBRAKE = 1, F_UP = 2, F_DOWN = 4, F_ANALOG = 8, F_ASSIST = 16, F_ARCADE = 32 };
 
 // Little-endian writer and a bounds-checked reader: replays arrive from the internet.
 struct Out {
@@ -106,7 +106,7 @@ RunInput quantize(const CarInput& in) {
     q.throttle = uint8_t(std::lround(std::clamp(in.throttle, 0.0f, 1.0f) * 255));
     q.brake = uint8_t(std::lround(std::clamp(in.brake, 0.0f, 1.0f) * 255));
     q.flags = uint8_t((in.handbrake ? F_HANDBRAKE : 0) | (in.shiftUp ? F_UP : 0) | (in.shiftDown ? F_DOWN : 0) | (in.analog ? F_ANALOG : 0) |
-                      (in.assist ? F_ASSIST : 0));
+                      (in.assist ? F_ASSIST : 0) | (in.arcade ? F_ARCADE : 0));
     return q;
 }
 
@@ -120,7 +120,15 @@ CarInput expand(const RunInput& q) {
     in.shiftDown = q.flags & F_DOWN;
     in.analog = q.flags & F_ANALOG;
     in.assist = q.flags & F_ASSIST;
+    in.arcade = q.flags & F_ARCADE;
     return in;
+}
+
+void applyContact(Car& car, uint8_t event) {
+    if (!(event & EV_CONTACT)) return;
+    car.u *= event & EV_PUSH ? 1.05f : 0.7f;
+    car.x += event & EV_LEFT ? -0.3f : 0.3f;
+    car.damage.body = std::min(1.0f, car.damage.body + 0.03f);
 }
 
 bool pushOutRule(Car& car, const Course& c, int& noProgress, float& progressS) {
@@ -164,7 +172,7 @@ std::string Replay::encode() const {
     for (auto& [n, q] : runs) {
         o.u16(n);
         o.u16(uint16_t(q.steer));
-        o.u8(q.throttle), o.u8(q.brake), o.u8(q.flags);
+        o.u8(q.throttle), o.u8(q.brake), o.u8(q.flags), o.u8(q.event);
     }
     return o.b;
 }
@@ -173,7 +181,9 @@ bool Replay::decode(const std::string& bytes, Replay& r, std::string& why) {
     In in{bytes};
     if (!in.need(4) || std::memcmp(bytes.data(), MAGIC, 4) != 0) return why = "not a replay", false;
     in.p = 4;
-    if (in.u16() != VERSION) return why = "unknown replay version", false;
+    const uint32_t version = in.u16();
+    if (version != 1 && version != VERSION) return why = "unknown replay version", false;
+    const size_t runBytes = version == 1 ? 7 : 8;
     r.game = in.str(16);
     r.build = in.str(40);
     r.stage = int(in.u8());
@@ -193,7 +203,7 @@ bool Replay::decode(const std::string& bytes, Replay& r, std::string& why) {
     r.checkpoints.reserve(cps);
     for (uint32_t k = 0; k < cps; k++) r.checkpoints.push_back(getSnap(in));
     const uint32_t nruns = in.u32();
-    if (!in.ok || nruns == 0 || nruns > frames || !in.need(size_t(nruns) * 7)) return why = "bad inputs", false;
+    if (!in.ok || nruns == 0 || nruns > frames || !in.need(size_t(nruns) * runBytes)) return why = "bad inputs", false;
     r.inputs.clear();
     r.inputs.reserve(frames);
     for (uint32_t k = 0; k < nruns; k++) {
@@ -201,7 +211,9 @@ bool Replay::decode(const std::string& bytes, Replay& r, std::string& why) {
         RunInput q;
         q.steer = int16_t(in.u16());
         q.throttle = uint8_t(in.u8()), q.brake = uint8_t(in.u8()), q.flags = uint8_t(in.u8());
-        if (n == 0 || r.inputs.size() + n > frames || q.flags > 31 || q.steer == -32768) return why = "bad inputs", false;
+        if (version >= 2) q.event = uint8_t(in.u8());
+        if (n == 0 || r.inputs.size() + n > frames || q.flags > 63 || q.steer == -32768) return why = "bad inputs", false;
+        if (q.event > 7 || (q.event && !(q.event & EV_CONTACT))) return why = "bad inputs", false;
         r.inputs.insert(r.inputs.end(), n, q);
     }
     if (!in.ok || r.inputs.size() != frames) return why = "bad inputs", false;
@@ -243,7 +255,11 @@ VerifyResult verifyReplay(const Replay& rep) {
         res.reason = why;
         return res;
     };
-    if (rep.game != "rally") return reject("unknown game");
+    // Two boards: the simulation ("rally") and arcade handling ("rallyarc"). Every frame must match its board.
+    if (rep.game != "rally" && rep.game != "rallyarc") return reject("unknown game");
+    const bool arcade = rep.game == "rallyarc";
+    for (const RunInput& q : rep.inputs)
+        if (bool(q.flags & F_ARCADE) != arcade) return reject("handling does not match the board");
     if (rep.stage < 0 || rep.stage >= NUM_STAGES) return reject("unknown stage");
     if (rep.spec < 0 || rep.spec >= NUM_CARS) return reject("unknown car");
     const Damage& d = rep.damage;
@@ -268,6 +284,7 @@ VerifyResult verifyReplay(const Replay& rep) {
     // Each second from its own checkpoint: step it and compare with the next.
     Car car;
     float time = 0, worst = 0;
+    int contacts = 0;
     bool discrete = false;
     const size_t frames = rep.inputs.size();
     for (size_t k = 0; k < rep.checkpoints.size(); k++) {
@@ -282,6 +299,10 @@ VerifyResult verifyReplay(const Replay& rep) {
             car.step(course, expand(rep.inputs[f]), DT, rep.manual);
             pushOutRule(car, course, noProgress, progressS);
             const bool over = car.segIndex(course) >= course.finishSeg;
+            if (rep.inputs[f].event) {  // another crew touched us, after this step (as in the game)
+                applyContact(car, rep.inputs[f].event);
+                contacts++;
+            }
             if (over && f + 1 != frames) return reject("inputs go on past the finish");
             if (!over && f + 1 == frames) return reject("did not reach the finish");
         }
@@ -303,6 +324,13 @@ VerifyResult verifyReplay(const Replay& rep) {
     if (worst > 1e-3f || discrete) {
         res.verdict = Verdict::Review;
         res.reason = "replay drifts from its checkpoints";
+        return res;
+    }
+    // A contact can't be checked (the other crews aren't in the replay) and one could be made up to
+    // gain a push: the drive checks out, but a person decides.
+    if (contacts) {
+        res.verdict = Verdict::Review;
+        res.reason = "touched another crew (" + std::to_string(contacts) + "x)";
         return res;
     }
     res.verdict = Verdict::Accepted;

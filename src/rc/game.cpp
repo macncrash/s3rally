@@ -448,11 +448,12 @@ void RallyChamp::updateMenus(bool confirm, bool back) {
                 sfx_->menuMove();
             }
             if (pad.pressed(gs::BTN_UP) || pad.pressed(gs::BTN_DOWN)) {
-                // Four set-ups: automatic or manual, with or without traction help.
-                const int k = (manual_ ? 1 : 0) + (assist_ ? 0 : 2);
-                const int n = (k + (pad.pressed(gs::BTN_DOWN) ? 1 : 3)) % 4;
+                // Six set-ups: arcade, driving help or none, each automatic or manual.
+                const int k = (manual_ ? 1 : 0) + (arcade_ ? 0 : assist_ ? 2 : 4);
+                const int n = (k + (pad.pressed(gs::BTN_DOWN) ? 1 : 5)) % 6;
                 manual_ = n & 1;
-                assist_ = !(n & 2);
+                arcade_ = n < 2;
+                assist_ = n < 4;
                 sfx_->menuMove();
             }
             if (back) { mode_ = game_ == Game::Rally || game_ == Game::TimeAttack ? Mode::Pick : Mode::Menu; t_ = 0; break; }
@@ -517,10 +518,11 @@ void RallyChamp::updateMenus(bool confirm, bool back) {
                 noProgress_ = 0;
                 progressS_ = car_.s;
                 // Record the drive: a replay the score server can check (not in online races, which start mid-stage).
-                if (game_ != Game::Online) rec_.begin("rally", S3_VERSION_STRING, stage_, car_, course_, manual_);
+                if (game_ != Game::Online) rec_.begin(arcade_ ? "rallyarc" : "rally", S3_VERSION_STRING, stage_, car_, course_, manual_);
                 else rec_.clear();
                 // A registered player's run starts with a server ticket, and counts as a play.
                 if (game_ != Game::Online && score_ && score_->registered() && score_->upload() != gs::ScoreClient::Upload::Never) {
+                    score_->setGame(arcade_ ? "rallyarc" : "rally");  // arcade times have their own board
                     score_->startRun(stage_);
                     score_->play(false);
                 }

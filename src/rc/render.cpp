@@ -672,7 +672,10 @@ void RallyChamp::drawMenus() {
             bar(21, "POWER", (c.torque / c.mass - 0.28f) / 0.12f);
             bar(22, "GRIP", (c.grip - 0.9f) / 0.12f);
             bar(23, "4WD", c.frontDrive / 0.45f);
-            hud(6, 25, std::string(manual_ ? "MANUAL (Q/W)" : "AUTOMATIC") + (assist_ ? " + DRIVING HELP" : " - NO HELP"), PAL_HUD);
+            {
+                const std::string setup = std::string(arcade_ ? "ARCADE" : assist_ ? "DRIVING HELP" : "NO HELP") + (manual_ ? " + MANUAL (Q/W)" : " + AUTOMATIC");
+                hud(20 - int(setup.size()) / 2, 25, setup, arcade_ ? PAL_YELLOW : PAL_HUD);
+            }
             hud(12, 26, "UP/DOWN: SET-UP", PAL_HUD);
             text("<", 40, 100, 2, PAL_YELLOW);
             text(">", 280, 100, 2, PAL_YELLOW);

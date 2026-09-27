@@ -38,6 +38,7 @@ struct CarInput {
     bool handbrake = false, shiftUp = false, shiftDown = false;
     bool analog = false;
     bool assist = true;  // traction help: drive is held below what the tyres can take
+    bool arcade = false; // arcade handling: steer where you want to go, drifts that help, no spins
 };
 
 struct Damage {

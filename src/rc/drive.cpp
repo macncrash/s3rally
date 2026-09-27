@@ -43,7 +43,21 @@ std::string fmtTime(float t) {
 // ================================================================ input
 
 CarInput RallyChamp::readPad() {
-    if (!sys_ || autopilot_ || (sys_->headless && !sys_->scripted)) return botInput();
+    if (!sys_ || autopilot_ || (sys_->headless && !sys_->scripted)) {
+        CarInput in = botInput();
+        in.arcade = arcade_;  // the autopilot drives with the handling the player chose
+        if (keyboardBot_) {  // a person on a keyboard: on/off keys, a moment late
+            in.analog = false;
+            in.steer = in.steer > 0.3f ? 1.0f : in.steer < -0.3f ? -1.0f : 0.0f;
+            in.throttle = in.throttle > 0.2f ? 1.0f : 0.0f;
+            in.brake = in.brake > 0.2f ? 1.0f : 0.0f;
+            keyLag_.push_back(in);
+            if (keyLag_.size() < 12) return CarInput{};
+            in = keyLag_.front();
+            keyLag_.erase(keyLag_.begin());
+        }
+        return in;
+    }
     const gs::Pad& p = sys_->pad;
     CarInput in;
     in.steer = p.axisX;
@@ -55,6 +69,7 @@ CarInput RallyChamp::readPad() {
     in.shiftUp = p.pressed(gs::BTN_Y);
     in.shiftDown = p.pressed(gs::BTN_X);
     in.assist = assist_;
+    in.arcade = arcade_;
     return in;
 }
 
@@ -439,9 +454,10 @@ void RallyChamp::updateOthers() {
             clouds_.push_back({o.s - 2, o.x, 0.6f, 2.2f, 0, 60 * (venue_ == 3 ? 9 : 5)});
         // Contact with us.
         if (mode_ == Mode::Stage && o.startAt < 0 && std::fabs(gap) < 4.2f && std::fabs(o.x - car_.x) < 1.8f && contactCool_ == 0) {
-            car_.u *= gap > 0 ? 0.7f : 1.05f;
-            car_.x += car_.x < o.x ? -0.3f : 0.3f;
-            car_.damage.body = std::min(1.0f, car_.damage.body + 0.03f);
+            // (the replay carries it: the verifier doesn't have the other crews)
+            const uint8_t ev = uint8_t(EV_CONTACT | (gap > 0 ? 0 : EV_PUSH) | (car_.x < o.x ? EV_LEFT : 0));
+            applyContact(car_, ev);
+            rec_.contact(ev);
             sfx_->bump();
             sys_->rumble(0.5f, 0.5f, 150);
             contactCool_ = 30;
@@ -497,6 +513,7 @@ RallyChamp::SimReport RallyChamp::simulateStage(int st, int car, std::vector<std
     attract_ = false;
     carId_ = car;
     manual_ = false;
+    arcade_ = testArcade_;
     car_.damage = Damage{};
     startOrder_.clear();
     for (int i = 0; i < 15; i++) startOrder_.push_back(i);

@@ -73,7 +73,7 @@ flying off.
 - **Modes:** the Championship (all five rallies), a single rally, Time Attack
   against your own ghost, and **Online** for up to four crews. There are three
   levels (AMATEUR, PRO, LEGEND) and three cars, including a rear-drive legend
-  that is a handful. **Driving help** is on by default: a held arrow key asks for the tightest turn the tyres can hold (never a spin-inducing full lock), spins are damped early, wheelspin is limited, and the soft ground past the edge scrubs off speed before you reach the trees. Turn it off on the car screen for the raw car.
+  that is a handful. **ARCADE handling** is the default, as in S3 RUN and SUNSET CRUISE: the car turns where you steer, up to a generous grip, so at the limit it runs wide instead of spinning, and holding the steering into a bend at speed (on the power or the handbrake) swings the tail out in a drift that helps you round. No counter-steering, no spins; jumps, surfaces, hits and damage are all still there. Arcade times have their own online board. On the car screen (UP/DOWN) you can switch to the simulation instead. With **driving help**, a held arrow key asks for the tightest turn the tyres can hold (never a spin-inducing full lock), spins are damped early, wheelspin is limited, and the soft ground past the edge scrubs off speed before you reach the trees. Or choose no help for the raw car.
 
 ## (3) RALLY 32: the S3-32
 
@@ -295,6 +295,7 @@ src/           main · multicart (the menu) · multi (several consoles in one pr
 ./s3 --music-test DIR       # check YOUR MUSIC loads, plays and advances with a folder
 ./s3 --versus-test [STAGE] [--players N] [--discover] [--cart run]   # 2-4 consoles race over loopback UDP
 ./s3 --replay-test             # record every stage, verify the replays, catch forged ones
+./s3 --arcade-test             # arcade against simulation handling, autopilot and a clumsy keyboard driver
 ./tools/score-test.sh          # the online scoreboard end to end (needs cargo)
 ```
 

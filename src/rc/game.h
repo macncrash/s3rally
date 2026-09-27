@@ -131,6 +131,9 @@ public:
     void demoTitle() { toTitle(); }
     void testAutopilot(bool on) { autopilot_ = on; }
     void testAssist(bool on) { assist_ = on; }
+    void testArcade(bool on) { testArcade_ = on; }  // headless stages drive the simulation unless asked
+    // A clumsier driver for tests: keys on or off (no analog), reacting 0.2 s late.
+    void testKeyboardDriver(bool on) { keyboardBot_ = on; keyLag_.clear(); }
     int crashCount() const { return crashes_; }
     float testClock() const { return stageTime_ + car_.penalty; }
     int voiceReady() const { return voice_ ? voice_->ready() : 0; }
@@ -220,6 +223,10 @@ private:
     int carId_ = 0;
     bool manual_ = false;
     bool assist_ = true;  // traction help (car select)
+    bool arcade_ = true;  // arcade handling (car select): the default, it's how most people want to drive
+    bool testArcade_ = false;
+    bool keyboardBot_ = false;
+    std::vector<CarInput> keyLag_;
     int difficulty_ = 0;  // 0 amateur, 1 pro, 2 legend
     int venue_ = 0, stageNo_ = 0, stage_ = -1, loadedVenue_ = -1, loadedTod_ = -1;
     bool attract_ = true;

@@ -21,11 +21,17 @@ namespace rc {
 struct RunInput {
     int16_t steer = 0;        // -32767..32767
     uint8_t throttle = 0, brake = 0;
-    uint8_t flags = 0;        // handbrake, shift up, shift down, analog, assist
+    uint8_t flags = 0;        // handbrake, shift up, shift down, analog, assist, arcade
+    uint8_t event = 0;        // after this frame's step: contact with another crew (RunEvent bits)
     bool operator==(const RunInput& o) const {
-        return steer == o.steer && throttle == o.throttle && brake == o.brake && flags == o.flags;
+        return steer == o.steer && throttle == o.throttle && brake == o.brake && flags == o.flags && event == o.event;
     }
 };
+// Another crew's car touched ours (the game moves our car outside its physics step, so the
+// replay carries it): pushed along or slowed, and nudged to one side.
+enum RunEvent : uint8_t { EV_CONTACT = 1, EV_PUSH = 2, EV_LEFT = 4 };
+void applyContact(Car& car, uint8_t event);  // exactly what the game does
+
 RunInput quantize(const CarInput& in);
 CarInput expand(const RunInput& q);
 
@@ -61,6 +67,9 @@ class RunRecorder {
 public:
     void begin(const std::string& game, const std::string& build, int stage, const Car& car, const Course& c, bool manual);
     void frame(const RunInput& in, const Car& car, const Course& c, int noProgress, float progressS);
+    void contact(uint8_t event) {  // this frame, after its step
+        if (active() && !rep_.inputs.empty()) rep_.inputs.back().event |= event;
+    }
     void finish(float total) { rep_.claimed = total, done_ = true; }
     void clear() { rep_ = Replay(), active_ = done_ = false; }
     bool active() const { return active_ && !done_; }

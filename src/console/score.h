@@ -46,6 +46,7 @@ public:
 
     bool enabled() const { return !url_.empty(); }
     bool registered() const { return !token_.empty() && !id_.empty(); }
+    void setGame(const std::string& game) { game_ = game; }
     bool busy() const;
     // What the player chose: ask each time, always upload, or never.
     enum class Upload { Ask, Always, Never };
