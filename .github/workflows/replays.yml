@@ -18,6 +18,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: brew install sdl2
       - run: make -j4 s3
+      - run: ./s3 --determinism
       - name: record
         run: |
           mkdir -p replays
@@ -38,6 +39,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -f server/Dockerfile --build-arg BUILD_ID=${GITHUB_SHA::7} -t s3-scores:ci .
+      - run: docker run --rm s3-scores:ci /app/s3 --determinism
       - uses: actions/download-artifact@v4
         with:
           name: mac-replays
