@@ -697,40 +697,53 @@ Course buildCourse(int stage) {
         s.objs.push_back({type, off, flip});
     };
     auto side = [&]() { return rnd() < 0.5f ? -1.0f : 1.0f; };
+    // Random draws in a fixed order, so every compiler builds the same course: C++ leaves the order
+    // of function arguments (and of the two sides of a *) open, and GCC and clang differ. The
+    // items of a braced list are evaluated left to right, and sideTimes draws the side first.
+    struct Spot {
+        Obj type;
+        float off;
+        bool flip = false;
+    };
+    auto putAt = [&](int i, const Spot& s) { put(i, s.type, s.off, s.flip); };
+    auto sideTimes = [&](auto magnitude) {
+        const float sgn = side();
+        return sgn * magnitude();
+    };
     for (int i = 0; i < N; i++) {
         const Segment& s = c.segs[size_t(i)];
         const float e = s.hw;  // road edge
         const float r = rnd();
         switch (c.venue) {
             case 0:  // Finland: pine and birch forest close to the road
-                if (i % 4 == 0) put(i, O_PINE, -(e + rnd.range(5, 8)), rnd() < 0.5f);
-                if (i % 4 == 2) put(i, O_PINE, e + rnd.range(5, 8), rnd() < 0.5f);
-                if (i % 5 == 1) put(i, rnd() < 0.5f ? O_BIRCH : O_PINE, side() * (e + rnd.range(6, 16)), rnd() < 0.5f);
-                if (r < 0.03f) put(i, O_ROCK, side() * (e + rnd.range(0.8f, 2.5f)));
-                if (r > 0.992f) put(i, O_LOGS, side() * (e + rnd.range(2, 4)));
+                if (i % 4 == 0) putAt(i, Spot{O_PINE, -(e + rnd.range(5, 8)), rnd() < 0.5f});
+                if (i % 4 == 2) putAt(i, Spot{O_PINE, e + rnd.range(5, 8), rnd() < 0.5f});
+                if (i % 5 == 1) putAt(i, Spot{rnd() < 0.5f ? O_BIRCH : O_PINE, sideTimes([&] { return e + rnd.range(6, 16); }), rnd() < 0.5f});
+                if (r < 0.03f) putAt(i, Spot{O_ROCK, sideTimes([&] { return e + rnd.range(0.8f, 2.5f); })});
+                if (r > 0.992f) putAt(i, Spot{O_LOGS, sideTimes([&] { return e + rnd.range(2, 4); })});
                 break;
             case 1:  // Norway: snowbanks lining the road, snowy pines behind
-                if (i % 3 == 0) put(i, O_SNOWBANK, -(e + 0.9f), rnd() < 0.5f);
-                if (i % 3 == 1) put(i, O_SNOWBANK, e + 0.9f, rnd() < 0.5f);
-                if (i % 4 == 2) put(i, O_PINE_SNOW, side() * (e + rnd.range(4, 12)), rnd() < 0.5f);
+                if (i % 3 == 0) putAt(i, Spot{O_SNOWBANK, -(e + 0.9f), rnd() < 0.5f});
+                if (i % 3 == 1) putAt(i, Spot{O_SNOWBANK, e + 0.9f, rnd() < 0.5f});
+                if (i % 4 == 2) putAt(i, Spot{O_PINE_SNOW, sideTimes([&] { return e + rnd.range(4, 12); }), rnd() < 0.5f});
                 break;
             case 2:  // Italy: maquis, olive trees, rocks, stone walls
-                if (r < 0.10f) put(i, O_BUSH, side() * (e + rnd.range(1, 4)), rnd() < 0.5f);
-                if (i % 9 == 0) put(i, O_OLIVE, side() * (e + rnd.range(3, 10)), rnd() < 0.5f);
-                if (r > 0.97f) put(i, O_ROCK, side() * (e + rnd.range(0.6f, 2)));
-                if (i % 23 == 0 && rnd() < 0.4f) put(i, O_CYPRESS, side() * (e + rnd.range(5, 12)));
+                if (r < 0.10f) putAt(i, Spot{O_BUSH, sideTimes([&] { return e + rnd.range(1, 4); }), rnd() < 0.5f});
+                if (i % 9 == 0) putAt(i, Spot{O_OLIVE, sideTimes([&] { return e + rnd.range(3, 10); }), rnd() < 0.5f});
+                if (r > 0.97f) putAt(i, Spot{O_ROCK, sideTimes([&] { return e + rnd.range(0.6f, 2); })});
+                if (i % 23 == 0 && rnd() < 0.4f) putAt(i, Spot{O_CYPRESS, sideTimes([&] { return e + rnd.range(5, 12); })});
                 break;
             case 3:  // Australia: gum trees, spinifex, termite mounds
-                if (i % 8 == 0) put(i, O_GUM, side() * (e + rnd.range(4, 14)), rnd() < 0.5f);
-                if (r < 0.07f) put(i, O_BUSH, side() * (e + rnd.range(1.5f, 6)), rnd() < 0.5f);
-                if (r > 0.985f) put(i, O_ANTHILL, side() * (e + rnd.range(2, 6)));
+                if (i % 8 == 0) putAt(i, Spot{O_GUM, sideTimes([&] { return e + rnd.range(4, 14); }), rnd() < 0.5f});
+                if (r < 0.07f) putAt(i, Spot{O_BUSH, sideTimes([&] { return e + rnd.range(1.5f, 6); }), rnd() < 0.5f});
+                if (r > 0.985f) putAt(i, Spot{O_ANTHILL, sideTimes([&] { return e + rnd.range(2, 6); })});
                 break;
             default: {  // Cyprus: pines above, rock on the inside, the drop below
                 const float uphill = s.left == gs::GROUND_DROP ? 1.0f : s.right == gs::GROUND_DROP ? -1.0f : side();
-                if (i % 5 == 0) put(i, O_PINE, uphill * (e + rnd.range(3, 9)), rnd() < 0.5f);
-                if (i % 17 == 3) put(i, O_CLIFF, uphill * (e + rnd.range(3.5f, 6)), rnd() < 0.5f);
-                if (r < 0.05f) put(i, O_ROCK, uphill * (e + rnd.range(0.6f, 2)));
-                if (r > 0.96f) put(i, O_BUSH, side() * (e + rnd.range(1, 4)));
+                if (i % 5 == 0) putAt(i, Spot{O_PINE, uphill * (e + rnd.range(3, 9)), rnd() < 0.5f});
+                if (i % 17 == 3) putAt(i, Spot{O_CLIFF, uphill * (e + rnd.range(3.5f, 6)), rnd() < 0.5f});
+                if (r < 0.05f) putAt(i, Spot{O_ROCK, uphill * (e + rnd.range(0.6f, 2))});
+                if (r > 0.96f) putAt(i, Spot{O_BUSH, sideTimes([&] { return e + rnd.range(1, 4); })});
                 break;
             }
         }
@@ -741,7 +754,7 @@ Course buildCourse(int stage) {
             if (c.segs[size_t(i)].surf == TARMAC && i % 3 == 0) {
                 put(i, O_STONEWALL, -(c.segs[size_t(i)].hw + 1.4f));
                 put(i, O_STONEWALL, c.segs[size_t(i)].hw + 1.4f);
-                if (i % 30 == 0) put(i, O_HUT, side() * (c.segs[size_t(i)].hw + 6));
+                if (i % 30 == 0) putAt(i, Spot{O_HUT, sideTimes([&] { return c.segs[size_t(i)].hw + 6; })});
             }
     }
     // Corners: arrow boards on the outside of slow ones, rocks on the inside where you'd cut.
@@ -751,10 +764,10 @@ Course buildCourse(int stage) {
         const float outside = float(-cn.dir);
         const int apex = (cn.start + cn.end) / 2;
         if (cn.sev <= 2 || cn.sev == 7)
-            for (int i = cn.start; i < cn.end; i += 8) put(i, cn.dir > 0 ? O_ARROW_R : O_ARROW_L, outside * (c.segs[size_t(i)].hw + 1.2f));
+            for (int i = cn.start; i < cn.end; i += 8) putAt(i, Spot{cn.dir > 0 ? O_ARROW_R : O_ARROW_L, outside * (c.segs[size_t(i)].hw + 1.2f)});
         const bool rocky = c.venue == 2 || c.venue == 4 || (c.venue == 0 && cn.sev <= 3);
         if (rocky && rnd() < 0.45f) {
-            for (int i = apex - 6; i <= apex + 6; i += 3) put(i, O_ROCK, -outside * (c.segs[size_t(std::clamp(i, 0, N - 1))].hw + 0.5f));
+            for (int i = apex - 6; i <= apex + 6; i += 3) putAt(i, Spot{O_ROCK, -outside * (c.segs[size_t(std::clamp(i, 0, N - 1))].hw + 0.5f)});
             cutRock[k] = 1;
         }
         const Segment& ap = c.segs[size_t(std::clamp(apex, 0, N - 1))];
@@ -765,20 +778,20 @@ Course buildCourse(int stage) {
         if (ev.kind == Event::JUMP || ev.kind == Event::CREST) {
             const int at = ev.seg + ev.len / 3;
             for (int i = at; i < at + 30; i += 6) {
-                put(i, O_SPECTATORS, -(c.segs[size_t(i)].hw + 6 + rnd() * 2), rnd() < 0.5f);
-                put(i + 3, O_SPECTATORS, c.segs[size_t(i)].hw + 6 + rnd() * 2, rnd() < 0.5f);
+                putAt(i, Spot{O_SPECTATORS, -(c.segs[size_t(i)].hw + 6 + rnd() * 2), rnd() < 0.5f});
+                putAt(i + 3, Spot{O_SPECTATORS, c.segs[size_t(i)].hw + 6 + rnd() * 2, rnd() < 0.5f});
             }
             put(at - 4, O_TAPE, -(c.segs[size_t(at)].hw + 4.5f));
             put(at - 4, O_TAPE, c.segs[size_t(at)].hw + 4.5f, true);
         }
     for (const Corner& cn : corners)
         if (cn.sev == 7 && rnd() < 0.6f)
-            for (int i = cn.start; i < cn.end; i += 7) put(i, O_SPECTATORS, float(-cn.dir) * (c.segs[size_t(i)].hw + 7 + rnd() * 3), rnd() < 0.5f);
+            for (int i = cn.start; i < cn.end; i += 7) putAt(i, Spot{O_SPECTATORS, float(-cn.dir) * (c.segs[size_t(i)].hw + 7 + rnd() * 3), rnd() < 0.5f});
     // Kangaroo warning signs, and sometimes a mob grazing by the road.
     if (c.venue == 3)
         for (int i = c.startSeg + 200; i < c.finishSeg - 100; i += 500 + int(rnd() * 400)) {
             put(i, O_ROO_SIGN, c.segs[size_t(i)].hw + 1.5f);
-            for (int k = 0; k < 3; k++) put(i + 80 + k * 4, O_ROO, side() * (c.segs[size_t(i)].hw + rnd.range(5, 12)), rnd() < 0.5f);
+            for (int k = 0; k < 3; k++) putAt(i + 80 + k * 4, Spot{O_ROO, sideTimes([&] { return c.segs[size_t(i)].hw + rnd.range(5, 12); }), rnd() < 0.5f});
         }
     // Kilometre posts.
     for (int km1 = 1; km1 * 1000 < c.stageMetres; km1++) put(c.startSeg + int(km1 * 1000 / segM), O_KM_POST, -(c.segs[size_t(c.startSeg)].hw + 0.8f));
@@ -806,8 +819,8 @@ Course buildCourse(int stage) {
     put(c.finishSeg, O_BOARD_FINISH, -(c.segs[size_t(c.finishSeg)].hw + 1.5f));
     put(c.finishSeg, O_BOARD_FINISH, c.segs[size_t(c.finishSeg)].hw + 1.5f);
     for (int i = c.finishSeg + 6; i < c.finishSeg + 40; i += 7) {
-        put(i, O_SPECTATORS, -(c.segs[size_t(i)].hw + 5), rnd() < 0.5f);
-        put(i + 3, O_SPECTATORS, c.segs[size_t(i)].hw + 5, rnd() < 0.5f);
+        putAt(i, Spot{O_SPECTATORS, -(c.segs[size_t(i)].hw + 5), rnd() < 0.5f});
+        putAt(i + 3, Spot{O_SPECTATORS, c.segs[size_t(i)].hw + 5, rnd() < 0.5f});
     }
     put(c.stopSeg, O_BOARD_STOP, -(c.segs[size_t(c.stopSeg)].hw + 1.5f));
     put(c.stopSeg + 2, O_MARSHAL, c.segs[size_t(c.stopSeg)].hw + 1.2f, true);
