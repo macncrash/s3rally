@@ -1,0 +1,57 @@
+# Replays recorded on a Mac (Apple clang, ARM) must verify on the score server
+# (the Docker image: Debian GCC, x86-64). Every stage, simulation and arcade
+# handling, the autopilot and the clumsy keyboard driver.
+name: replays across platforms
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  record-mac:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install sdl2
+      - run: make -j4 s3
+      - name: record
+        run: |
+          mkdir -p replays
+          for s in $(seq 0 14); do
+            ./s3 --write-replay $s replays/sim-auto-$s.bin
+            S3_REPLAY_ARCADE=1 ./s3 --write-replay $s replays/arc-auto-$s.bin
+            S3_REPLAY_KEYBOARD=1 ./s3 --write-replay $s replays/sim-keys-$s.bin
+            S3_REPLAY_ARCADE=1 S3_REPLAY_KEYBOARD=1 ./s3 --write-replay $s replays/arc-keys-$s.bin
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-replays
+          path: replays
+
+  verify-server:
+    needs: record-mac
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f server/Dockerfile --build-arg BUILD_ID=${GITHUB_SHA::7} -t s3-scores:ci .
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-replays
+          path: replays
+      - name: verify with the server's own verifier
+        run: |
+          acc=0; rev=0; rej=0
+          for f in replays/*.bin; do
+            set +e
+            out=$(docker run --rm -v "$PWD/$f:/r.bin:ro" s3-scores:ci /app/s3 --verify-run /r.bin)
+            code=$?
+            set -e
+            case $code in 0) acc=$((acc+1));; 1) rev=$((rev+1)); echo "review   $f $out";; *) rej=$((rej+1)); echo "REJECTED $f $out";; esac
+          done
+          echo "accepted $acc  review $rev  rejected $rej"
+          # A genuine drive must never be rejected. (Review is allowed for contact with other crews.)
+          test $rej -eq 0

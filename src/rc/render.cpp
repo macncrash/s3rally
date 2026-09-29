@@ -2,6 +2,7 @@
 // and cars as scaled sprites, the cockpit, the HUD and the menus.
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -932,6 +933,12 @@ void RallyChamp::drawNet() {
                                         : st == "rejected" ? "NOT ACCEPTED"
                                                            : "NOT SENT";
             hud(20 - int(verdict.size()) / 2, 3, verdict, st == "accepted" ? PAL_YELLOW : PAL_RED);
+            if (st == "rejected" || st == "review") {  // why, in the server's words
+                std::string why;
+                for (char c : score_->lastReason) why += char(std::toupper(static_cast<unsigned char>(c)));
+                if (why.size() > 38) why.resize(38);
+                hud(20 - int(why.size()) / 2, 4, why, PAL_HUD);
+            }
             if (!b.loaded) {
                 hud(15, 12, score_->busy() ? "LOADING" : "NO BOARD", PAL_HUD);
                 break;

@@ -823,7 +823,9 @@ namespace rc {
 
 void RallyChamp::netUpload() {
     // The replay goes with the time: the server drives it again before it counts.
-    score_->submit(stage_, myTime_[stage_], base64Encode(rec_.replay().encode()), S3_VERSION_STRING);
+    const std::string replay = base64Encode(rec_.replay().encode());
+    sys_->saveBlob("last-upload.txt", replay);  // kept, so a disputed run can be checked again
+    score_->submit(stage_, myTime_[stage_], replay, S3_VERSION_STRING);
     netSent_ = true;
 }
 
