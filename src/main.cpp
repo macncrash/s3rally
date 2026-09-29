@@ -501,6 +501,8 @@ static int writeReplay(int stage, const char* path) {
     gs::System sys(true);
     auto cart = std::make_unique<rc::RallyChamp>();
     sys.bootCart(*cart);
+    cart->testArcade(std::getenv("S3_REPLAY_ARCADE") != nullptr);            // arcade handling
+    cart->testKeyboardDriver(std::getenv("S3_REPLAY_KEYBOARD") != nullptr);  // the clumsy keyboard driver
     const auto r = cart->simulateStage(stage, stage % rc::NUM_CARS, nullptr, "");
     if (!r.finished || !cart->recorder().done()) return 1;
     const std::string bytes = cart->recorder().replay().encode();
