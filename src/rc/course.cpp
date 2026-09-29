@@ -562,7 +562,7 @@ Course buildCourse(int stage) {
         events.push_back({Event::BUMPS, at, len, 0});
         k--;
     }
-    std::sort(events.begin(), events.end(), [](const Event& a, const Event& b) { return a.seg < b.seg; });
+    std::stable_sort(events.begin(), events.end(), [](const Event& a, const Event& b) { return a.seg < b.seg; });
     // Apply the shapes on top of the terrain.
     std::vector<float> add(size_t(N) + 1, 0.0f);
     std::vector<std::pair<int, float>> jumpSafe;
@@ -844,7 +844,7 @@ Course buildCourse(int stage) {
     for (const Event& ev : events)
         items.push_back({ev.kind == Event::JUMP ? ev.seg + int(12 / segM) : ev.seg + (ev.kind == Event::CREST ? ev.len / 2 : 0),
                                                          ev.seg + ev.len, false, 0, &ev});
-    std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.at < b.at; });
+    std::stable_sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.at < b.at; });
     // Surface changes worth a call.
     for (int i = c.startSeg + 20; i < c.finishSeg; i++) {
         const Surf a = surf[size_t(i - 1)], b = surf[size_t(i)];
@@ -934,7 +934,7 @@ Course buildCourse(int stage) {
         f.seg = c.finishSeg;
         c.notes.push_back(f);
     }
-    std::sort(c.notes.begin(), c.notes.end(), [](const Note& a, const Note& b) { return a.at < b.at; });
+    std::stable_sort(c.notes.begin(), c.notes.end(), [](const Note& a, const Note& b) { return a.at < b.at; });
 
     // When to read each call: about three seconds ahead at a good pace.
     const std::vector<float> vp = speedProfile(c, 1.0f, 7.0f, 8.0f, 55.0f);
