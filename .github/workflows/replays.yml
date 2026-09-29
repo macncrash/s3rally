@@ -53,5 +53,15 @@ jobs:
             case $code in 0) acc=$((acc+1));; 1) rev=$((rev+1)); echo "review   $f $out";; *) rej=$((rej+1)); echo "REJECTED $f $out";; esac
           done
           echo "accepted $acc  review $rev  rejected $rej"
+          # Replays recorded here, for checking on other platforms.
+          mkdir -p linux-replays
+          for s in 6 7 9 10; do
+            docker run --rm -e S3_REPLAY_KEYBOARD=1 -v "$PWD/linux-replays:/out" s3-scores:ci sh -c "/app/s3 --write-replay $s /tmp/r.bin >/dev/null && cat /tmp/r.bin" > linux-replays/sim-keys-$s.bin
+          done
           # A genuine drive must never be rejected. (Review is allowed for contact with other crews.)
           test $rej -eq 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-replays
+          path: linux-replays
