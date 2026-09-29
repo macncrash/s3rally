@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace rc {
@@ -308,6 +310,15 @@ VerifyResult verifyReplay(const Replay& rep) {
         }
         if (k + 1 < rep.checkpoints.size()) {
             const Gap g = gap({car.snapshot(course), noProgress, progressS}, rep.checkpoints[k + 1]);
+            if (std::getenv("S3_VERIFY_DEBUG") && (g.metres > 2.0f || g.worst > 1e-3f || g.discrete)) {  // what differs, for platform work
+                const CarSnapshot a = car.snapshot(course), &b = rep.checkpoints[k + 1].car;
+                std::fprintf(stderr, "checkpoint %zu (%zu s):", k + 1, k + 1);
+                for (int j = 0; j < CarSnapshot::NF; j++)
+                    if (std::fabs(a.f[j] - b.f[j]) > 1e-4f) std::fprintf(stderr, " f%d %g/%g", j, double(a.f[j]), double(b.f[j]));
+                for (int j = 0; j < CarSnapshot::NI; j++)
+                    if (a.i[j] != b.i[j]) std::fprintf(stderr, " i%d %d/%d", j, a.i[j], b.i[j]);
+                std::fprintf(stderr, "\n");
+            }
             if (g.metres > 2.0f) return reject("the car jumps between checkpoints at " + std::to_string(k + 1) + " s");
             worst = std::max(worst, g.worst);
             discrete |= g.discrete;
