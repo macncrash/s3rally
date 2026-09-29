@@ -8,7 +8,9 @@
 // from + - * /, sqrt, floor and exact power-of-two scaling, which IEEE-754
 // makes identical everywhere (with -ffp-contract=off, so no fused
 // multiply-adds), in double precision, so they are also accurate to ~1e-15.
-// The physics (car.cpp) and the course (course.cpp) use these.
+// The physics (car.cpp) and the course (course.cpp) use these. (The course also sorts with
+// std::stable_sort: plain std::sort orders equal items differently in each C++ library, and
+// scenery on the same segment would come out in a different order on a Mac and on Linux.)
 #pragma once
 #include <cmath>
 
