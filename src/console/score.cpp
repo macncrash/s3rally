@@ -297,7 +297,8 @@ ScoreClient::ScoreClient(System& sys, std::string game) : sys_(sys), game_(std::
     if (sys.headless && !std::getenv("S3_SCORE_URL")) return;  // tests only talk to a server they were given
 #endif
     url_ = scoreServerUrl();
-    std::istringstream in(sys_.loadBlob("score.txt"));
+    // Headless (tests, the verifier) starts signed out: never the player's own saved sign-up.
+    std::istringstream in(sys.headless ? std::string() : sys_.loadBlob("score.txt"));
     std::string line;
     while (std::getline(in, line)) {
         const auto eq = line.find('=');
@@ -335,11 +336,9 @@ void ScoreClient::decline() {
     save();
 }
 
-bool ScoreClient::busy() const {
-    for (auto& c : calls_)
-        if (!c->done) return true;
-    return false;
-}
+// Busy until every reply has been read by poll(), not just arrived: a screen that checks busy()
+// before poll() in the same frame would otherwise see "done" but not yet the result.
+bool ScoreClient::busy() const { return !calls_.empty(); }
 
 std::string ScoreClient::signature(const std::string& method, const std::string& path, const std::string& body) const {
     // X-S3-Auth: id:ms:nonce:HMAC-SHA256(SHA-256(token), METHOD \n PATH \n ms \n nonce \n hex(SHA-256(body)))
