@@ -434,9 +434,14 @@ static int scoreTest() {
           "HMAC-SHA256 test vector");
     check(sc && sc->enabled(), "a server is set: " + gs::scoreServerUrl());
     if (!sc || !sc->enabled()) return 1;
+    // Joining the way the game's screens wait: "still busy?" checked each frame before the frame's poll().
     sc->registerPlayer(cart->profile().id, "TESTER");
-    sc->wait();
-    check(sc->registered(), "joined with the game's own player ID");
+    for (int f = 0; f < 60 * 30; f++) {
+        if (!sc->busy()) break;
+        sc->poll();
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    }
+    check(sc->registered(), "joined with the game's own player ID (as the screen sees it)");
     sc->registerPlayer(cart->profile().id, "COPYCAT");
     sc->wait();
     check(sc->error == "ID ALREADY REGISTERED", "the same ID can't join twice");
