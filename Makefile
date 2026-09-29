@@ -6,7 +6,7 @@ SDL_CFLAGS := $(shell $(SDL2_CONFIG) --cflags)
 SDL_LIBS   := $(shell $(SDL2_CONFIG) --libs)
 BUILD_ID   := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 CXXFLAGS ?= -O2 -g
-CXXFLAGS += -pthread -std=c++17 -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -MMD -MP $(SDL_CFLAGS) -Isrc -DS3_BUILD='"$(BUILD_ID)"'
+CXXFLAGS += -pthread -ffp-contract=off -std=c++17 -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -MMD -MP $(SDL_CFLAGS) -Isrc -DS3_BUILD='"$(BUILD_ID)"'
 SRC := $(wildcard src/console/*.cpp src/game/*.cpp src/rc/*.cpp src/g32/*.cpp src/rc32/*.cpp src/*.cpp)
 OBJ := $(SRC:src/%.cpp=build/%.o)
 
@@ -32,7 +32,7 @@ sim: s3
 # WebAssembly build for browsers (needs Emscripten: em++ on PATH).
 web:
 	@mkdir -p build-web
-	em++ -std=c++17 -O2 -Isrc -DS3_BUILD='"$(BUILD_ID)"' -sUSE_SDL=2 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=134217728 -sSTACK_SIZE=1048576 \
+	em++ -std=c++17 -O2 -ffp-contract=off -Isrc -DS3_BUILD='"$(BUILD_ID)"' -sUSE_SDL=2 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=134217728 -sSTACK_SIZE=1048576 \
 		-sEXPORTED_FUNCTIONS=_main,_malloc,_free -sEXPORTED_RUNTIME_METHODS=ccall,UTF8ToString,stringToUTF8,stringToNewUTF8 \
 		-sENVIRONMENT=web --shell-file web/shell.html $(SRC) -o build-web/index.html
 	mkdir -p build-web/32
