@@ -553,6 +553,52 @@ static int arcadeTest() {
     return fails ? 1 : 0;
 }
 
+// Fingerprints for cross-platform work: a hash of each stage's course (geometry
+// and every object), and of the car's state after driving it with scripted
+// inputs. Two builds that agree here compute the same drives.
+static int determinism() {
+    auto mix = [](uint64_t& h, const void* p, size_t n) {
+        const unsigned char* b = static_cast<const unsigned char*>(p);
+        for (size_t i = 0; i < n; i++) h = (h ^ b[i]) * 1099511628211ull;
+    };
+    uint64_t all = 1469598103934665603ull;
+    for (int st = 0; st < rc::NUM_STAGES; st++) {
+        const rc::Course c = rc::buildCourse(st);
+        uint64_t hc = 1469598103934665603ull;
+        for (const rc::Segment& g : c.segs) {
+            const float f[] = {g.z1, g.z2, g.y1, g.y2, g.curve, g.kappa, g.hw, g.safe};
+            mix(hc, f, sizeof f);
+            const uint8_t u[] = {uint8_t(g.surf), g.band, g.left, g.right, g.flags};
+            mix(hc, u, sizeof u);
+            for (const rc::Placed& o : g.objs) {
+                const int t = int(o.type);
+                mix(hc, &t, sizeof t);
+                mix(hc, &o.off, sizeof o.off);
+                mix(hc, &o.flip, sizeof o.flip);
+            }
+        }
+        // The car: a fixed weave down the stage (steer by a slow sine of the frame, throttle on).
+        rc::Car car;
+        car.reset(c, c.startSeg, st % rc::NUM_CARS);
+        uint64_t hp = 1469598103934665603ull;
+        for (int f = 0; f < 60 * 40; f++) {
+            rc::CarInput in;
+            in.steer = float((f / 30) % 5 - 2) * 0.4f;
+            in.throttle = 1;
+            in.handbrake = (f / 90) % 7 == 3;
+            in.arcade = st % 2;
+            car.step(c, in, 1.0f / 60, false);
+            const rc::CarSnapshot sn = car.snapshot(c);
+            mix(hp, &sn, sizeof sn);
+        }
+        std::printf("stage %2d  course %016llx  drive %016llx\n", st, (unsigned long long)hc, (unsigned long long)hp);
+        mix(all, &hc, sizeof hc);
+        mix(all, &hp, sizeof hp);
+    }
+    std::printf("all %016llx\n", (unsigned long long)all);
+    return 0;
+}
+
 // The score server's check: replay a stage from FILE and print one line of JSON.
 // Exit 0 accepted, 1 review, 2 rejected. No window, no sound: only the rules.
 static int verifyRun(const char* path) {
@@ -611,6 +657,7 @@ int main(int argc, char** argv) {
         }
         else if (!std::strcmp(argv[i], "--verify-run") && i + 1 < argc) return verifyRun(argv[i + 1]);
         else if (!std::strcmp(argv[i], "--replay-test")) return replayTest();
+        else if (!std::strcmp(argv[i], "--determinism")) return determinism();
         else if (!std::strcmp(argv[i], "--arcade-test")) return arcadeTest();
         else if (!std::strcmp(argv[i], "--write-replay") && i + 2 < argc) return writeReplay(std::atoi(argv[i + 1]), argv[i + 2]);
         else if (!std::strcmp(argv[i], "--score-test")) return scoreTest();
