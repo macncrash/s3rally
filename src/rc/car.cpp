@@ -1,4 +1,5 @@
 #include "car.h"
+#include "dmath.h"
 
 #include <algorithm>
 #include <cmath>
@@ -17,7 +18,7 @@ inline float sgn(float v) { return v < 0 ? -1.0f : 1.0f; }
 float tyre(float alpha, float peak, float fall) {
     const float a = std::fabs(alpha) / peak;
     float f;
-    if (a < 1) f = std::sin(a * PI / 2);
+    if (a < 1) f = dm::sin(a * PI / 2);
     else f = std::max(1 - fall, 1 - fall * std::min(1.0f, (a - 1) / 2.5f));
     return sgn(alpha) * f;
 }
@@ -70,9 +71,9 @@ float Car::groundSlope(const Course& c, float sAt) const {
     return (g.y2 - g.y1) / SEG;
 }
 
-float Car::along() const { return u * std::cos(psi) - v * std::sin(psi); }
+float Car::along() const { return u * dm::cos(psi) - v * dm::sin(psi); }
 float Car::speed() const { return std::sqrt(u * u + v * v); }
-float Car::drift() const { return std::fabs(u) < 1 ? 0 : std::atan2(v, std::fabs(u)); }
+float Car::drift() const { return std::fabs(u) < 1 ? 0 : dm::atan2(v, std::fabs(u)); }
 
 void Car::reset(const Course& c, int seg, int spec) {
     *this = Car();
@@ -86,7 +87,7 @@ float Car::engineTorque(float rpmNow) const {
     const CarSpec& cs = carSpec(specId);
     const float p = rpmNow / cs.rpmPeak;
     float t;
-    if (p < 1) t = 0.55f + 0.45f * std::sin(p * PI / 2);
+    if (p < 1) t = 0.55f + 0.45f * dm::sin(p * PI / 2);
     else t = 1 - 0.55f * (rpmNow - cs.rpmPeak) / (cs.rpmMax - cs.rpmPeak) * 0.8f;
     if (rpmNow > cs.rpmMax) t = 0;  // limiter
     return cs.torque * std::max(0.0f, t) * (1 - 0.45f * damage.engine);
@@ -111,12 +112,12 @@ void Car::step(const Course& c, const CarInput& in, float dt, bool manual) {
             v -= v / spd * dec;
         }
         roll += rollRate * dt;
-        rollRate *= std::pow(0.55f, dt);
-        r *= std::pow(0.3f, dt);
+        rollRate *= dm::pow(0.55f, dt);
+        r *= dm::pow(0.3f, dt);
         psi += r * dt;
         const float ds = along() / std::max(0.2f, 1 - seg(c).kappa * x);
         s += ds * dt;
-        x += (u * std::sin(psi) + v * std::cos(psi)) * dt;
+        x += (u * dm::sin(psi) + v * dm::cos(psi)) * dt;
         psi -= seg(c).kappa * ds * dt;
         y = ground(c, s);
         rpm += (900 - rpm) * 0.1f;
@@ -286,17 +287,17 @@ void Car::driveStep(const Course& c, const CarInput& in, float dt, bool manual) 
 
     // Slip angles and tyre forces.
     const float uu = std::max(std::fabs(u), 2.0f) * (u >= 0 ? 1 : -1);
-    const float af = std::atan2(v + cs.a * r, std::fabs(uu)) - steerAngle * (u >= 0 ? 1 : -1);
-    const float ar = std::atan2(v - cs.b * r, std::fabs(uu));
+    const float af = dm::atan2(v + cs.a * r, std::fabs(uu)) - steerAngle * (u >= 0 ? 1 : -1);
+    const float ar = dm::atan2(v - cs.b * r, std::fabs(uu));
     const float Fyf = -latF * tyre(af, sf.peak, sf.fall);
     const float Fyr = -latR * tyre(ar, sf.peak, sf.fall);
 
     // Resistances: rolling (surface), air, and the hill.
     const float slope = groundSlope(c, s);
     const float resist = rollRes * m * GRAV + 0.45f * u * std::fabs(u) * (1 + 0.0f);
-    const float hill = -m * GRAV * slope * std::cos(psi);
+    const float hill = -m * GRAV * slope * dm::cos(psi);
 
-    const float cosd = std::cos(steerAngle), sind = std::sin(steerAngle);
+    const float cosd = dm::cos(steerAngle), sind = dm::sin(steerAngle);
     float fx = Fxr + Fxf * cosd - Fyf * sind + hill - (std::fabs(u) > 0.05f ? sgn(u) * resist : 0);
     float fy = Fyr + Fyf * cosd + Fxf * sind;
     float mz = cs.a * (Fyf * cosd + Fxf * sind) - cs.b * Fyr;
@@ -306,7 +307,7 @@ void Car::driveStep(const Course& c, const CarInput& in, float dt, bool manual) 
     float dr = mz / cs.inertia;
     // Stability help: when the car yaws much faster than the steering asks, damp it (a spin caught early).
     if (in.assist && std::fabs(u) > 5) {
-        const float rKin = u * std::tan(steerAngle) / L;
+        const float rKin = u * dm::tan(steerAngle) / L;
         const float excess = r - rKin;
         // Only near a real spin: drifts are the point.
         if (std::fabs(drift()) > 0.3f && std::fabs(excess) > 0.2f) dr -= 3.0f * (excess - (excess > 0 ? 0.2f : -0.2f));
@@ -315,7 +316,7 @@ void Car::driveStep(const Course& c, const CarInput& in, float dt, bool manual) 
     const float slowK = clampf((std::fabs(u) - 1.0f) / 3.0f, 0, 1);
     u += du * dt;
     if (slowK < 1) {
-        const float rKin = u * std::tan(steerAngle) / L;
+        const float rKin = u * dm::tan(steerAngle) / L;
         r += (rKin - r) * (1 - slowK) * std::min(1.0f, dt * 20);
         v *= 1 - (1 - slowK) * std::min(1.0f, dt * 10);
     }
@@ -332,11 +333,11 @@ void Car::driveStep(const Course& c, const CarInput& in, float dt, bool manual) 
         const bool onRoad = std::fabs(x) < g.hw + 0.5f;
         const bool drifting = onRoad && std::fabs(steerIn) > 0.55f && u > 14 && (in.handbrake || in.throttle > 0.5f);
         const float rMax = mu * GRAV * 1.35f * (drifting ? 1.1f : 1.0f) / std::fabs(u);
-        const float rWant = clampf(u * std::tan(steerIn * cs.steerMax / (1 + std::fabs(u) / 40)) / L + pull, -rMax, rMax);
+        const float rWant = clampf(u * dm::tan(steerIn * cs.steerMax / (1 + std::fabs(u) / 40)) / L + pull, -rMax, rMax);
         r += (rWant - r) * std::min(1.0f, dt * 6);
-        const float vWant = drifting ? u * std::tan(-sgn(steerIn) * 0.3f) : 0.0f;  // tail out: the car slides to the outside
+        const float vWant = drifting ? u * dm::tan(-sgn(steerIn) * 0.3f) : 0.0f;  // tail out: the car slides to the outside
         v += (vWant - v) * std::min(1.0f, dt * (drifting ? 3.0f : 4.0f));
-        const float lim = std::fabs(u) * std::tan(0.6f);
+        const float lim = std::fabs(u) * dm::tan(0.6f);
         v = clampf(v, -lim, lim);
         if (drifting) u -= 1.2f * dt;
     }
@@ -345,7 +346,7 @@ void Car::driveStep(const Course& c, const CarInput& in, float dt, bool manual) 
     // Move along the road.
     const float ds = along() / std::max(0.2f, 1 - g.kappa * x);
     s += ds * dt;
-    x += (u * std::sin(psi) + v * std::cos(psi)) * dt;
+    x += (u * dm::sin(psi) + v * dm::cos(psi)) * dt;
     psi += (r - g.kappa * ds) * dt;
 
     // Sliding and sound cues.
@@ -355,7 +356,7 @@ void Car::driveStep(const Course& c, const CarInput& in, float dt, bool manual) 
 
     // Body roll and pitch from the forces (visual only).
     roll += (clampf(-fy / m * 0.012f, -0.12f, 0.12f) - roll) * std::min(1.0f, dt * 6);
-    pitch += (clampf(-axPrev_ * 0.006f, -0.06f, 0.06f) + std::atan(slope) - pitch) * std::min(1.0f, dt * 8);
+    pitch += (clampf(-axPrev_ * 0.006f, -0.06f, 0.06f) + dm::atan(slope) - pitch) * std::min(1.0f, dt * 8);
 
     // Vertical: follow the ground unless it falls away faster than gravity can pull
     // the car down (a crest taken fast, or the lip of a jump): then we fly.
@@ -368,8 +369,8 @@ void Car::driveStep(const Course& c, const CarInput& in, float dt, bool manual) 
         y = g0;
         vy = ds * sBack;
         // The rear wheels leave last, so the nose starts to drop.
-        pitch = std::atan(sBack);
-        pitchRate = -ds * (std::atan(sBack) - std::atan(sAhead)) / L * 0.15f;
+        pitch = dm::atan(sBack);
+        pitchRate = -ds * (dm::atan(sBack) - dm::atan(sAhead)) / L * 0.15f;
         ev.launched = true;
     } else {
         // Compression in dips (visual bounce), and a hard bottoming-out costs suspension.
@@ -400,7 +401,7 @@ void Car::airStep(const Course& c, const CarInput& in, float dt) {
     const CarSpec& cs = carSpec(specId);
     const float ds = along() / std::max(0.2f, 1 - seg(c).kappa * x);
     s += ds * dt;
-    x += (u * std::sin(psi) + v * std::cos(psi)) * dt;
+    x += (u * dm::sin(psi) + v * dm::cos(psi)) * dt;
     psi += (r - seg(c).kappa * ds) * dt;
     u -= 0.45f * u * std::fabs(u) / cs.mass * dt;
     r *= 1 - 0.2f * dt;
@@ -419,11 +420,11 @@ void Car::airStep(const Course& c, const CarInput& in, float dt) {
     airborne = false;
     const float slope = groundSlope(c, s);
     const float impact = ds * slope - vy;  // how fast we're meeting the ground, m/s
-    const float nose = pitch - std::atan(slope);  // positive: rear lands first (good), negative: nose first
+    const float nose = pitch - dm::atan(slope);  // positive: rear lands first (good), negative: nose first
     y = g0;
     vy = ds * slope;
     pitchRate = 0;
-    pitch = std::atan(slope);
+    pitch = dm::atan(slope);
     compress = clampf(impact * 0.03f, 0, 0.2f);
     ev.landed = impact;
     const float sideways = std::fabs(drift()) + std::fabs(psi) * 0.3f;
@@ -519,13 +520,13 @@ void Car::edges(const Course& c, float dt) {
     const float over = std::fabs(x) - g.hw;
     if (over <= 0) return;
     const uint8_t side = x < 0 ? g.left : g.right;
-    const float lat = u * std::sin(psi) + v * std::cos(psi);  // speed across the road
+    const float lat = u * dm::sin(psi) + v * dm::cos(psi);  // speed across the road
     const float out = sgn(x) * lat;                           // positive: heading further off
     // Driving help: the soft ground beyond the edge soaks up speed heading away from the road.
     if (assist_ && out > 0 && over > 0.5f && side != gs::GROUND_SNOWWALL) {
         const float k = std::min(1.0f, dt * 2.5f * std::min(1.0f, over / 2));
         const float cut = out * k;
-        const float c0 = std::cos(psi), s0 = std::sin(psi);
+        const float c0 = dm::cos(psi), s0 = dm::sin(psi);
         u -= sgn(x) * cut * s0;
         v -= sgn(x) * cut * c0;
     }
@@ -534,7 +535,7 @@ void Car::edges(const Course& c, float dt) {
         x = sgn(x) * (g.hw + 0.5f);
         if (out > 0) {
             const float push = out * 1.3f;
-            v -= sgn(x) * push * std::cos(psi);
+            v -= sgn(x) * push * dm::cos(psi);
             u -= std::fabs(push) * 0.25f;
             ev.bank = out;
             if (out > 9) damage.body = std::min(1.0f, damage.body + (out - 9) * 0.02f);

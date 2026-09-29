@@ -1,4 +1,5 @@
 #include "course.h"
+#include "dmath.h"
 
 #include <algorithm>
 #include <cmath>
@@ -385,7 +386,7 @@ Profile profileFor(int v, int n) {
 }
 
 // A smooth "bump" from 0 to 1 and back, for crests and dips.
-float bell(float t) { return t <= 0 || t >= 1 ? 0 : 0.5f - 0.5f * std::cos(t * 2 * PI); }
+float bell(float t) { return t <= 0 || t >= 1 ? 0 : 0.5f - 0.5f * dm::cos(t * 2 * PI); }
 
 }  // namespace
 
@@ -487,8 +488,8 @@ Course buildCourse(int stage) {
         const float ph0 = rnd() * 6.28f, ph1 = rnd() * 6.28f, ph2 = rnd() * 6.28f;
         for (int i = 0; i <= N; i++) {
             const float s = i * segM;
-            h[size_t(i)] = P.hills * (0.6f * std::sin(s / P.hillWave * 6.28f + ph0) + 0.3f * std::sin(s / (P.hillWave * 0.43f) * 6.28f + ph1) +
-                                      0.1f * std::sin(s / (P.hillWave * 0.17f) * 6.28f + ph2));
+            h[size_t(i)] = P.hills * (0.6f * dm::sin(s / P.hillWave * 6.28f + ph0) + 0.3f * dm::sin(s / (P.hillWave * 0.43f) * 6.28f + ph1) +
+                                      0.1f * dm::sin(s / (P.hillWave * 0.17f) * 6.28f + ph2));
         }
     }
     std::vector<Event> events;
@@ -650,7 +651,7 @@ Course buildCourse(int stage) {
         s.flags = flags[size_t(i)];
         s.band = uint8_t((i / 5) % 2);
         // Width breathes slowly; tarmac villages are wider, hairpins get a little extra.
-        s.hw = hwBase * (1 + 0.08f * std::sin(i * 0.013f + stage)) + (std::fabs(s.kappa) > 1 / 12.0f ? 0.6f : 0) + (s.surf == TARMAC ? 0.4f : 0);
+        s.hw = hwBase * (1 + 0.08f * dm::sin(i * 0.013f + stage)) + (std::fabs(s.kappa) > 1 / 12.0f ? 0.6f : 0) + (s.surf == TARMAC ? 0.4f : 0);
         s.left = s.right = gs::GROUND_LAND;
     }
     for (auto& js : jumpSafe) c.segs[size_t(js.first)].safe = js.second;
@@ -684,7 +685,7 @@ Course buildCourse(int stage) {
     }
     if (c.venue == 0 && n == 1) {  // Jarviranta: the lake along one side for long stretches
         for (int i = c.startSeg; i < c.finishSeg; i++)
-            if (std::sin(i * segM / 380.0f) > 0.35f) c.segs[size_t(i)].right = gs::GROUND_WATER;
+            if (dm::sin(i * segM / 380.0f) > 0.35f) c.segs[size_t(i)].right = gs::GROUND_WATER;
     }
 
     // ---------------------------------------------------------------- scenery
@@ -821,8 +822,8 @@ Course buildCourse(int stage) {
             pts[size_t(i)] = {x, y};
             c.headings[size_t(i)] = float(hd);
             hd += kap[size_t(i)] * segM;
-            x += std::sin(hd) * segM;
-            y -= std::cos(hd) * segM;
+            x += dm::sin(hd) * segM;
+            y -= dm::cos(hd) * segM;
         }
         double minX = 1e18, maxX = -1e18, minY = 1e18, maxY = -1e18;
         for (auto& p : pts) {
