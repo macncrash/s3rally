@@ -4,6 +4,7 @@
 //   s3 --cart rally    go straight to (3) RALLY (or --cart run)
 //   s3 --sim           headless: the autopilot drives every stage of both games, prints a report
 //   s3 --sim --cart X  just one game;  --shots D also saves screenshots into directory D
+//   s3 --demo          four-way split screen for a party: fullscreen, drop-in controllers (START joins)
 //   s3 --quad [N]      N consoles (2-4) on one stage over the network, split screen
 //   s3 --record-quad F [N]  film an N-player autopilot match to F.mp4 (needs ffmpeg)
 //   s3 --versus-test [STAGE] [--players N] [--discover]  headless multiplayer test
@@ -647,6 +648,8 @@ int main(int argc, char** argv) {
             }
             return versusTest(st, players, disc, cartName != "run");
         }
+        else if (!std::strcmp(argv[i], "--demo")) return runQuad(4, 0, cartName != "run", true);  // four-way, fullscreen
+        else if (!std::strcmp(argv[i], "--quad-shot") && i + 1 < argc) return quadShot(4, i + 2 < argc && std::isdigit(static_cast<unsigned char>(argv[i + 2][0])) ? std::atoi(argv[i + 2]) : 45, argv[i + 1]);
         else if (!std::strcmp(argv[i], "--quad")) {
             const int players = i + 1 < argc && std::isdigit(static_cast<unsigned char>(argv[i + 1][0])) ? std::atoi(argv[i + 1]) : 4;
             return runQuad(players, 0, cartName != "run");

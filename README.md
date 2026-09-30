@@ -203,6 +203,8 @@ you. Set `S3_NET_DEBUG=1` to log the protocol if a game won't connect.
 ### Four players on one screen
 
 ```bash
+./s3 --demo                            # the party demo: four-way split screen, fullscreen, cars 2 s apart;
+                                      #   plug in controllers any time and press START to take over a car
 ./s3 --quad 4                         # 2x2 split screen, (3) Rally: four crews, 10 s apart
 ./s3 --quad 4 --cart run              # the same for S3 RUN
 ./s3 --record-quad match.mp4 4        # film an autopilot 4-way match (needs ffmpeg)

@@ -536,10 +536,16 @@ void RallyChamp::drawHud() {
             if (o.running) spr(art_.panel, px(o.s), y + 1, 4, o.startAt < 0 ? PAL_YELLOW : PAL_RED, false, 0);
         spr(art_.panel, px(c.s), y + 3, 7, PAL_HUD, false, 0);
     }
-    // Gap to the car ahead once it's close.
-    for (const Other& o : others_)
-        if (o.startAt < 0 && o.running && o.s > c.s && o.s - c.s < 250 && mode_ == Mode::Stage)
-            hud(26, 5, "CAR AHEAD " + std::to_string(int(o.s - c.s)) + "M", PAL_HUD);
+    // Gap to the car ahead once it's close (the nearest one, when several are).
+    {
+        float gap = 1e9f;
+        for (const Other& o : others_)
+            if (o.startAt < 0 && o.running && o.s > c.s && o.s - c.s < 250 && mode_ == Mode::Stage) gap = std::min(gap, o.s - c.s);
+        if (gap < 1e8f) {
+            const std::string t = "CAR AHEAD " + std::to_string(int(gap)) + "M";
+            hud(39 - int(t.size()), 5, t, PAL_HUD);
+        }
+    }
 
     if (view_ != View::Cockpit || mode_ == Mode::Finish) drawNotes(24);
     else drawNotes(28);
