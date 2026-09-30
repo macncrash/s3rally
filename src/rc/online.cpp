@@ -138,9 +138,9 @@ void RallyChamp::startOnlineStage() {
     attract_ = false;
     car_.damage = Damage{};
     loadStage(std::clamp(versus_.stage, 0, NUM_STAGES - 1));
-    // Ten seconds between starters, in slot order: the host goes first.
+    // Ten seconds between starters (a real rally), in slot order: the host goes first.
     const int me = versus_.mySlot;
-    startGo_ = 60 * 8 + me * 600;
+    startGo_ = 60 * 8 + me * int(60 * startGap_);
     others_.clear();
     const int pals[3] = {PAL_RIVAL, PAL_RIVAL2, PAL_RIVAL3};
     int used = 0;
@@ -148,7 +148,7 @@ void RallyChamp::startOnlineStage() {
         if (s == me || !versus_.players[s].active) continue;
         Other o;
         o.slot = s;
-        o.startAt = (s - me) * 10.0f;
+        o.startAt = (s - me) * startGap_;
         o.name = versus_.players[s].name;
         o.pal = pals[std::min(used++, 2)];
         setCarPalette(*vdp_, o.pal, versus_.players[s].car);

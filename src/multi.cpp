@@ -6,12 +6,15 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
+#include "console/gfx.h"
 #include "console/system.h"
 #include "game/rally.h"
 #include "rc/game.h"
@@ -187,35 +190,94 @@ void quadAudio(void* user, Uint8* stream, int len) {
 }
 }  // namespace
 
+// Text on the 640x448 quad picture, in the console's 5x7 font at double size.
+static void quadText(std::vector<uint32_t>& f, int x, int y, const std::string& s, uint32_t ink, bool box) {
+    const int w = int(s.size()) * 12 + 6, h = 20;
+    if (box)
+        for (int yy = y - 3; yy < y - 3 + h; yy++)
+            for (int xx = x - 3; xx < x - 3 + w; xx++)
+                if (xx >= 0 && xx < 640 && yy >= 0 && yy < 448) {
+                    uint32_t& p = f[size_t(yy) * 640 + size_t(xx)];
+                    p = 0xff000000u | ((p >> 2) & 0x3f3f3fu);  // darkened behind the text
+                }
+    for (size_t k = 0; k < s.size(); k++) {
+        const uint8_t* g = gs::glyph(s[k]);
+        if (!g) continue;
+        for (int gy = 0; gy < 7; gy++)
+            for (int gx = 0; gx < 5; gx++)
+                if (g[gy * 5 + gx])
+                    for (int d = 0; d < 4; d++) {
+                        const int px = x + int(k) * 12 + gx * 2 + d % 2, py = y + gy * 2 + d / 2;
+                        if (px >= 0 && px < 640 && py >= 0 && py < 448) f[size_t(py) * 640 + size_t(px)] = ink;
+                    }
+    }
+}
+
+// Seat i's tag in the corner of its quarter (with the lines between the quarters).
+static void quadLabel(std::vector<uint32_t>& f, int i, const std::string& s, bool human) {
+    const int ox = (i % 2) * 320, oy = (i / 2) * 224;
+    for (int y = 0; y < 448; y++) f[size_t(y) * 640 + 319] = f[size_t(y) * 640 + 320] = 0xff000000u;
+    for (int x = 0; x < 640; x++) f[223 * 640 + size_t(x)] = f[224 * 640 + size_t(x)] = 0xff000000u;
+    quadText(f, ox + 6, oy + 224 - 22, s, human ? 0xffffd23cu : 0xffb0b4c0u, true);
+}
+
+// A prompt across the middle of seat i's quarter.
+static void quadHint(std::vector<uint32_t>& f, int i, const std::string& s) {
+    const int ox = (i % 2) * 320, oy = (i / 2) * 224;
+    quadText(f, ox + 160 - int(s.size()) * 6, oy + 120, s, 0xffffffffu, true);
+}
+
 template <class Cart>
-int runQuadT(int n, int stage) {
+int runQuadT(int n, int stage, bool demo) {
+    const bool fullscreen = demo;
     n = std::clamp(n, 2, 4);
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) return 1;
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
-    SDL_Window* win = SDL_CreateWindow("S3-16 QUAD", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 960,
-                                       SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+    SDL_Window* win = SDL_CreateWindow("S3 QUAD", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 960,
+                                       SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | (fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0));
     SDL_Renderer* ren = win ? SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC) : nullptr;
     if (!ren) {
         std::fprintf(stderr, "quad: %s\n", SDL_GetError());
         return 1;
     }
+    SDL_ShowCursor(fullscreen ? SDL_DISABLE : SDL_ENABLE);
     SDL_Texture* tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 640, 448);
 
-    // Controllers in order: pad k drives seat k (seat 0 also has the keyboard).
-    std::vector<SDL_GameController*> pads;
-    for (int i = 0; i < SDL_NumJoysticks() && int(pads.size()) < n; i++)
-        if (SDL_IsGameController(i))
-            if (SDL_GameController* c = SDL_GameControllerOpen(i)) pads.push_back(c);
-
+    // Every seat starts with the autopilot; seat 0 also answers the keyboard.
     std::vector<Seat<Cart>> seats;
     std::vector<std::string> names;
-    for (int i = 0; i < n; i++) names.push_back(i == 0 || i < int(pads.size()) ? "PLAYER " + std::to_string(i + 1) : DEMO_NAMES[i]);
+    for (int i = 0; i < n; i++) names.push_back("PLAYER " + std::to_string(i + 1));
     std::vector<float> skill = {1.0f, 0.98f, 0.96f, 0.94f};
     if (!startSession(seats, n, stage, false, names, skill)) return 1;
-    for (int i = 0; i < n; i++) {
-        seats[size_t(i)].sys->scripted = i == 0 || i < int(pads.size());  // humans use their pads; the rest are AI
-        seats[size_t(i)].sys->ctl.connected = i < int(pads.size());
-    }
+    for (int i = 0; i < n; i++) seats[size_t(i)].sys->scripted = i == 0;  // player 1: keyboard (or the first pad)
+    // The demo starts the cars 2 s apart so they race together (a real rally is 10 s).
+    auto gaps = [&] {
+        if constexpr (std::is_same_v<Cart, rc::RallyChamp>)
+            for (auto& s : seats) s.cart->testStartGap(demo ? 2.0f : 10.0f);
+    };
+    gaps();
+
+    // Drop-in controllers: a pad that is plugged in (any time) joins when START is pressed on it,
+    // taking the next seat the computer is driving; unplugged, that seat goes back to the computer.
+    struct Pad {
+        SDL_GameController* c = nullptr;
+        SDL_JoystickID id = -1;
+        int seat = -1;  // -1: plugged in, not playing yet
+        bool trig[2] = {};
+    };
+    std::vector<Pad> pads;
+    std::vector<int> padOf(size_t(n), -1);  // seat -> pad index
+    auto seatHuman = [&](int s) { return s == 0 || padOf[size_t(s)] >= 0; };
+    auto release = [&](Pad& p) {
+        if (p.seat < 0) return;
+        gs::System& sys = *seats[size_t(p.seat)].sys;
+        sys.pad = gs::Pad{};
+        sys.ctl.connected = false;
+        if (p.seat != 0) sys.scripted = false;  // the computer takes the car back
+        padOf[size_t(p.seat)] = -1;
+        p.seat = -1;
+    };
+
     SDL_AudioSpec want{}, have{};
     want.freq = 48000;
     want.format = AUDIO_F32SYS;
@@ -227,11 +289,11 @@ int runQuadT(int n, int stage) {
     SDL_AudioDeviceID dev = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
     if (dev) SDL_PauseAudioDevice(dev, 0);
 
-    std::printf("QUAD: %d players, %zu controller(s). Keyboard drives player 1. Esc quits.\n", n, pads.size());
+    std::printf("QUAD: %d cars. Keyboard drives player 1; press START on a controller to join. F11 fullscreen, Esc quits.\n", n);
     std::vector<uint32_t> frame;
-    bool trig[4][2] = {};
     bool quit = false;
     int doneFor = 0, nextStage = stage;
+    long tick = 0;
     uint64_t last = SDL_GetPerformanceCounter();
     double acc = 0;
     while (!quit) {
@@ -240,11 +302,52 @@ int runQuadT(int n, int stage) {
             if (e.type == SDL_QUIT) quit = true;
             if (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) {
                 if (e.key.keysym.sym == SDLK_ESCAPE) quit = true;
+                if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.sym == SDLK_F11) {
+                    const bool fs = SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP;
+                    SDL_SetWindowFullscreen(win, fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
+                    SDL_ShowCursor(fs ? SDL_ENABLE : SDL_DISABLE);
+                }
                 const int b = gs::System::keyButton(e.key.keysym.sym);
                 if (b >= 0) seats[0].sys->pad.keys[b] = e.type == SDL_KEYDOWN;
             }
+            if (e.type == SDL_CONTROLLERDEVICEADDED) {
+                if (SDL_GameController* c = SDL_GameControllerOpen(e.cdevice.which)) {
+                    const SDL_JoystickID id = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(c));
+                    bool known = false;
+                    for (const Pad& p : pads) known |= p.id == id;
+                    if (known) SDL_GameControllerClose(c);
+                    else pads.push_back({c, id, -1, {}});
+                }
+            }
+            if (e.type == SDL_CONTROLLERDEVICEREMOVED) {
+                for (size_t k = 0; k < pads.size(); k++)
+                    if (pads[k].id == e.cdevice.which) {
+                        release(pads[k]);
+                        SDL_GameControllerClose(pads[k].c);
+                        pads.erase(pads.begin() + long(k));
+                        for (int& p : padOf)
+                            if (p > int(k)) p--;
+                        break;
+                    }
+            }
+            if (e.type == SDL_CONTROLLERBUTTONDOWN && e.cbutton.button == SDL_CONTROLLER_BUTTON_START) {
+                for (size_t k = 0; k < pads.size(); k++) {
+                    Pad& p = pads[k];
+                    if (p.id != e.cbutton.which || p.seat >= 0) continue;
+                    // Player 1 if nobody has that pad yet, else the first seat the computer drives.
+                    int seat = padOf[0] < 0 ? 0 : -1;
+                    for (int s = 1; s < n && seat < 0; s++)
+                        if (!seatHuman(s)) seat = s;
+                    if (seat < 0) break;  // all four taken
+                    p.seat = seat;
+                    padOf[size_t(seat)] = int(k);
+                    seats[size_t(seat)].sys->scripted = true;
+                    seats[size_t(seat)].sys->pad = gs::Pad{};
+                }
+            }
         }
-        for (size_t i = 0; i < pads.size(); i++) gs::System::readController(pads[i], seats[i].sys->ctl, seats[i].sys->pad, trig[i]);
+        for (Pad& p : pads)
+            if (p.seat >= 0) gs::System::readController(p.c, seats[size_t(p.seat)].sys->ctl, seats[size_t(p.seat)].sys->pad, p.trig);
         const uint64_t now = SDL_GetPerformanceCounter();
         acc += std::min(0.25, double(now - last) / double(SDL_GetPerformanceFrequency()));
         last = now;
@@ -253,17 +356,26 @@ int runQuadT(int n, int stage) {
             for (auto& s : seats) s.sys->step();
             acc -= 1.0 / 60;
             steps++;
+            tick++;
             // A few seconds after everyone has finished, race again on the next stage.
             doneFor = allDone(seats) ? doneFor + 1 : 0;
             if (doneFor > 60 * 8) {
                 nextStage = (nextStage + 1) % stageCount(seats[0].cart.get());
                 startSession(seats, n, nextStage, false, names, skill);
+                gaps();
+                for (int i = 0; i < n; i++) seats[size_t(i)].sys->scripted = seatHuman(i);
                 doneFor = 0;
             }
         }
         if (steps) {
             for (auto& s : seats) s.sys->render();
             composite(seats, frame);
+            for (int i = 0; i < n; i++) {
+                const bool human = seatHuman(i);
+                const std::string who = i == 0 ? (padOf[0] >= 0 ? "PAD" : "KEYS") : human ? "PAD" : "CPU";
+                quadLabel(frame, i, "P" + std::to_string(i + 1) + " " + who, human);
+                if (!human && (tick / 40) % 2) quadHint(frame, i, "PRESS START TO JOIN");
+            }
             SDL_UpdateTexture(tex, nullptr, frame.data(), 640 * 4);
         }
         int ww, wh;
@@ -277,7 +389,7 @@ int runQuadT(int n, int stage) {
         SDL_RenderPresent(ren);
     }
     if (dev) SDL_CloseAudioDevice(dev);  // before the consoles (and their samples) go away
-    for (auto* p : pads) SDL_GameControllerClose(p);
+    for (Pad& p : pads) SDL_GameControllerClose(p.c);
     SDL_DestroyTexture(tex);
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
@@ -292,6 +404,42 @@ int versusTest(int stage, int players, bool discover, bool champ) {
 int recordQuad(int players, int stage, const char* mp4Path, bool champ) {
     return champ ? recordQuadT<rc::RallyChamp>(players, stage, mp4Path) : recordQuadT<rally::Rally>(players, stage, mp4Path);
 }
-int runQuad(int players, int stage, bool champ) {
-    return champ ? runQuadT<rc::RallyChamp>(players, stage) : runQuadT<rally::Rally>(players, stage);
+int runQuad(int players, int stage, bool champ, bool fullscreen) {
+    return champ ? runQuadT<rc::RallyChamp>(players, stage, fullscreen) : runQuadT<rally::Rally>(players, stage, fullscreen);
 }
+
+namespace {
+// A still of the quad screen after `seconds` of racing (all autopilot), labels and all, to FILE.png.
+template <class Cart>
+int quadShotT(int n, int seconds, const char* png) {
+    std::vector<Seat<Cart>> seats;
+    std::vector<std::string> names;
+    for (int i = 0; i < n; i++) names.push_back("PLAYER " + std::to_string(i + 1));
+    if (!startSession(seats, n, 0, false, names, {1.0f, 0.98f, 0.96f, 0.94f})) return 1;
+    if (std::getenv("S3_QUAD_GAP"))
+        for (auto& s : seats) s.cart->testStartGap(float(std::atof(std::getenv("S3_QUAD_GAP"))));
+    const bool realtime = std::getenv("S3_QUAD_REALTIME") != nullptr;  // paced like the live window (the network runs in real time)
+    for (int f = 0; f < 60 * seconds; f++) {
+        for (auto& s : seats) s.sys->step();
+        if (realtime) std::this_thread::sleep_for(std::chrono::microseconds(16667));
+    }
+    for (auto& s : seats) s.sys->render();
+    std::vector<uint32_t> frame;
+    composite(seats, frame);
+    for (int i = 0; i < n; i++) {
+        quadLabel(frame, i, "P" + std::to_string(i + 1) + (i == 0 ? " KEYS" : i == 1 ? " PAD" : " CPU"), i < 2);
+        if (i >= 2) quadHint(frame, i, "PRESS START TO JOIN");
+    }
+    const std::string raw = std::string(png) + ".raw";
+    FILE* f = std::fopen(raw.c_str(), "wb");
+    if (!f) return 1;
+    std::fwrite(frame.data(), 4, frame.size(), f);
+    std::fclose(f);
+    const std::string cmd = "ffmpeg -v error -y -f rawvideo -pixel_format bgra -video_size 640x448 -i '" + raw + "' '" + png + "'";
+    const int rc = std::system(cmd.c_str());
+    std::remove(raw.c_str());
+    return rc == 0 ? 0 : 1;
+}
+}  // namespace
+
+int quadShot(int players, int seconds, const char* png) { return quadShotT<rc::RallyChamp>(players, seconds, png); }
