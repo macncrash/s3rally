@@ -14,6 +14,7 @@
 #include "g32/gte.h"
 #include "game/radio.h"
 #include "game/sound.h"
+#include "game/versus.h"
 #include "rc/art.h"
 #include "rc/car.h"
 #include "rc/course.h"
@@ -37,8 +38,39 @@ public:
     void setView(int v) { view_ = v; }
     size_t textureBytes() const { return gpu_.texBytes(); }
 
+    // Online, as in (3) RALLY: the same protocol, packet signature and physics, so the 16-bit,
+    // 32-bit and 64-bit carts can race each other. These are what the split screen and the
+    // network tests use (src/multi.cpp).
+    struct VersusReport {
+        bool finished = false, racing = false;
+        int rank = 0, mySlot = 0;
+        float time = 0;
+        bool active[rally::MAX_PLAYERS] = {}, seen[rally::MAX_PLAYERS] = {}, finishedSlot[rally::MAX_PLAYERS] = {};
+        float times[rally::MAX_PLAYERS] = {};
+        std::string names[rally::MAX_PLAYERS], ids[rally::MAX_PLAYERS];
+    };
+    void testProfile(const std::string& name) { myName_ = name; }
+    void testBotSkill(float s) { botSkill_ = s; }
+    void testDiscoveryPort(uint16_t p) { versus_.discoveryPort = p; }
+    void testStartGap(float seconds) { startGap_ = seconds; }
+    bool testHost(int stage, uint16_t port, int autoStart = 2);
+    bool testJoin(const std::string& ip, uint16_t port, int car);
+    uint16_t testHostPort() const { return versus_.gamePort; }
+    VersusReport versusReport() const;
+    std::string debugLine() const;
+
 private:
-    enum class Mode { Title, Pick, Drive, Done };
+    enum class Mode { Title, Pick, Lobby, Start, Drive, Done };
+    struct Other {  // another player's car, from the network
+        int slot = -1, car = 0;
+        float s = 0, x = 0, psi = 0, speed = 0, startAt = 0;
+        bool running = false, finished = false;
+        std::string name;
+    };
+    void updateOnline();
+    void startOnline();
+    void lobbyHud();
+    void drawCar(g32::V3 at, g32::V3 ground, float yaw, float pitch, float roll, const uint16_t* livery, bool cockpit);
     void loadStage(int stage);
     rc::CarInput readPad();
     rc::CarInput autopilot();
@@ -73,6 +105,15 @@ private:
     int view_ = 0;  // 0 chase, 1 cockpit, 2 far chase (V or Z)
     bool arcade_ = true;  // arcade handling (V on the stage screen), as in (3) RALLY
     void cockpitHud();
+
+    rally::Versus versus_;
+    bool online_ = false;     // this stage is a race against other players
+    int autoStart_ = 0;       // tests and the split screen: go when this many have joined
+    int startGo_ = 0;         // frames from the countdown to our own start
+    float startGap_ = 10;     // seconds between starters (a real rally; the split-screen demo goes closer)
+    float botSkill_ = 1;      // the autopilot's pace (split screen: a spread of drivers)
+    std::string myName_ = "PLAYER", lobbyMsg_;
+    std::vector<Other> others_;
 };
 
 }  // namespace rc32

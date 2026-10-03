@@ -31,6 +31,8 @@ jobs:
       - run: ./s3 --versus-test 2 --cart run
       - run: ./s3 --versus-test 1 --players 4 --cart run
       - run: ./s3 --versus-test 3 --players 4 --discover --cart run
+      - run: ./s3 --versus-test 0 --players 4 --cart rally32
+      - run: ./s3 --versus-test 5 --players 2 --discover --cart rally64
       - run: ./s3 --replay-test
       - run: ./s3 --arcade-test
 

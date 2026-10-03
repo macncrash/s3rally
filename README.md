@@ -96,6 +96,14 @@ bilinear filtering with mipmaps so distant gravel doesn't shimmer, and 640×480
 in 24-bit colour. It draws the screen in bands on parallel pipelines. Run
 `./s3 --cart rally64`, or pick it from the multi-cart.
 
+## Four players
+
+**4 PLAYERS** in the multi-cart menu (left/right picks (3) RALLY, RALLY 32 or RALLY 64) opens a four-way
+split screen: four complete consoles racing over the real network code, cars two seconds apart. The
+keyboard drives player 1; plug in controllers at any time and press START to take over a computer car.
+RALLY 32 and 64 also race over the LAN on their own: on the stage screen, W hosts and Q finds a game.
+They use the same protocol and physics as (3) RALLY.
+
 ## Online scoreboard (optional)
 
 Set a personal best on a stage and the game can put it on an online board. You join once, with the
@@ -205,6 +213,7 @@ you. Set `S3_NET_DEBUG=1` to log the protocol if a game won't connect.
 ```bash
 ./s3 --demo                            # the party demo: four-way split screen, fullscreen, cars 2 s apart;
                                       #   plug in controllers any time and press START to take over a car
+./s3 --demo --cart rally64            # the same in 3D on the S3-64 (or rally32); also 4 PLAYERS in the menu
 ./s3 --quad 4                         # 2x2 split screen, (3) Rally: four crews, 10 s apart
 ./s3 --quad 4 --cart run              # the same for S3 RUN
 ./s3 --record-quad match.mp4 4        # film an autopilot 4-way match (needs ffmpeg)

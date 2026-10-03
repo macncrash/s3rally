@@ -17,9 +17,14 @@ public:
     void init(gs::System& sys) override;
     void frame(gs::System& sys) override;
 
+    // The party demo: which game the menu asked for (0 RALLY, 1 RALLY 32, 2 RALLY 64), or -1.
+    int partyRequest() const { return party_; }
+    void clearParty() { party_ = -1; }
+
 private:
     void draw(gs::System& sys);
     int sel_ = 0;
+    int partyPick_ = 0, party_ = -1;
     int t_ = 0;
     int fontTile_[96] = {};
     std::unique_ptr<rc::RallyChamp> champ_;
