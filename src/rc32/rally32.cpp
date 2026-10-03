@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <cstdlib>
 
 #include "console/gfx.h"
@@ -46,6 +47,7 @@ std::string fmtTime(float t) {
 
 void Rally32::init(gs::System& sys) {
     sys_ = &sys;
+    std::memcpy(versus_.magic, "GSC1", 5);  // (3) RALLY's own: the 16-bit and 3D carts race together
     // The 16-bit art is generated into the board's sprite ROM once, then read back as textures.
     rc::buildArt(sys.vdp, art_);
     radio_ = std::make_unique<rally::Radio>(sys.apu);
@@ -242,6 +244,7 @@ rc::CarInput Rally32::autopilot() {
     float vt = 1e9f;
     for (int k = i; k <= std::min(course_.N - 1, i + int((4 + u * 0.35f) / SEG_M)); k++) vt = std::min(vt, botV_[size_t(k)]);
     vt = std::max(vt, 8.0f);
+    vt *= botSkill_;
     if (i >= course_.finishSeg) vt = std::min(vt, std::sqrt(8 * std::max(0.0f, (course_.stopSeg - i) * SEG_M - 4)));
     in.throttle = c.u < vt ? clampf((vt - c.u) * 0.5f + 0.3f, 0, 1) : 0;
     in.brake = c.u > vt * 1.04f ? clampf((c.u - vt) * 0.25f, 0.2f, 1) : 0;
@@ -252,6 +255,7 @@ rc::CarInput Rally32::autopilot() {
 
 void Rally32::frame(gs::System& sys) {
     t_++;
+    updateOnline();
     const gs::Pad& pad = sys.pad;
     const bool confirm = pad.pressed(gs::BTN_START) || pad.pressed(gs::BTN_C);
     if (pad.pressed(gs::BTN_Z)) radio_->next();
@@ -279,6 +283,16 @@ void Rally32::frame(gs::System& sys) {
                 car_.u = 18;
             }
             if (pad.pressed(gs::BTN_A)) arcade_ = !arcade_;  // V: arcade or simulation handling
+            if (pad.pressed(gs::BTN_Y) && gs::Link::available()) {  // W: host this stage on the LAN
+                versus_.myName = myName_;
+                if (versus_.host(pick_, carId_)) { autoStart_ = 0; mode_ = Mode::Lobby; t_ = 0; lobbyMsg_.clear(); }
+                else lobbyMsg_ = "COULD NOT OPEN THE NETWORK";
+            }
+            if (pad.pressed(gs::BTN_X) && gs::Link::available()) {  // Q: find a game on the LAN
+                versus_.myName = myName_;
+                if (versus_.search()) { mode_ = Mode::Lobby; t_ = 0; lobbyMsg_.clear(); }
+                else lobbyMsg_ = "COULD NOT OPEN THE NETWORK";
+            }
             if (pad.pressed(gs::BTN_UP) || pad.pressed(gs::BTN_DOWN)) {
                 carId_ = (carId_ + 1) % rc::NUM_CARS;
                 std::copy(rc::carSpec(carId_).livery, rc::carSpec(carId_).livery + 16, livery_);
@@ -291,6 +305,20 @@ void Rally32::frame(gs::System& sys) {
                 t_ = 0;
             }
             break;
+        case Mode::Lobby:  // (updateOnline() runs it)
+            car_.step(course_, autopilot(), DT, false);
+            break;
+        case Mode::Start: {  // online: on the line until our turn (the others start before or after us)
+            const rc::CarInput in = (sys.headless && !sys.scripted) ? autopilot() : readPad();
+            car_.rpm += ((900 + in.throttle * 5500) - car_.rpm) * 0.15f;
+            car_.throttle = in.throttle;
+            if (t_ >= startGo_) {
+                mode_ = Mode::Drive;
+                t_ = 0;
+                time_ = 0;
+            }
+            break;
+        }
         case Mode::Drive: {
             if (pad.pressed(gs::BTN_MODE)) { mode_ = Mode::Pick; attract_ = true; t_ = 0; break; }
             if (pad.pressed(gs::BTN_A)) view_ = (view_ + 1) % 3;  // V or Z: chase, cockpit, far
@@ -308,7 +336,16 @@ void Rally32::frame(gs::System& sys) {
         }
         case Mode::Done:
             car_.step(course_, autopilot(), DT, false);
-            if (t_ > 60 && confirm) { mode_ = Mode::Pick; attract_ = true; t_ = 0; }
+            if (t_ > 60 && confirm) {
+                if (online_) {  // the race is over for us: leave the session
+                    versus_.stop();
+                    online_ = false;
+                    others_.clear();
+                }
+                mode_ = Mode::Pick;
+                attract_ = true;
+                t_ = 0;
+            }
             break;
     }
     const bool driving = mode_ == Mode::Drive || mode_ == Mode::Done;
@@ -476,49 +513,58 @@ void Rally32::scene() {
             g32::billboard(gpu_, cam_, roadPoint((i + 0.5f) * SEG_M, o.off) + V3{0, lift, 0}, w, h, tx, o.flip);
         }
 
-    // The car: its polygons, turned and lit.
-    {
-        const float yaw = carH, pitch = car_.pitch, roll = car_.roll;
-        const float cyw = std::cos(yaw), syw = std::sin(yaw), cp = std::cos(pitch), sp = std::sin(pitch), cr = std::cos(roll), sr = std::sin(roll);
-        auto xf = [&](float x, float y, float z) {
-            y -= 0.7f;  // rolls turn about the middle of the car
-            const float x1 = x * cr - y * sr, y1 = x * sr + y * cr;
-            const float y2 = y1 * cp + z * sp, z2 = -y1 * sp + z * cp;
-            return carPos + V3{x1 * cyw + z2 * syw, y2 + 0.7f, -x1 * syw + z2 * cyw};
-        };
-        const V3 light = g32::normalize({-0.35f, 0.85f, -0.4f});
-        for (const rc::CarPoly& p : rc::carPolys()) {
-            const int n = int(p.xyz.size() / 3);
-            if (view_ == 1) {  // from the driver's seat you see the bonnet, nothing behind the windscreen
-                bool front = true;
-                for (int k = 0; k < n; k++) front &= p.xyz[size_t(k) * 3 + 2] > 1.05f && p.xyz[size_t(k) * 3 + 1] < 0.9f;
-                if (!front) continue;
-            }
-            WVtx q[10];
-            for (int k = 0; k < n && k < 10; k++) q[k].p = xf(p.xyz[size_t(k) * 3], p.xyz[size_t(k) * 3 + 1], p.xyz[size_t(k) * 3 + 2]);
-            V3 nrm = g32::normalize(g32::cross(q[1].p - q[0].p, q[2].p - q[0].p));
-            const bool facing = g32::dot(nrm, cam_.pos - q[0].p) > 0;
-            if (!facing && !p.twoSided) continue;  // back faces
-            if (!facing) nrm = nrm * -1;
-            const uint16_t c = to15(livery_[rc::carColorIndex(p.mat, std::max(0.0f, g32::dot(nrm, light)))]);
-            for (int k = 0; k < n; k++) shadeOf(c, q[k].r, q[k].g, q[k].b);
-            // Wheels and caps have up to 10 sides: fan them out in triangles.
-            for (int k = 1; k + 1 < n; k++) {
-                WVtx t[3] = {q[0], q[k], q[k + 1]};
-                g32::polygon(gpu_, cam_, t, 3, -1, g32::OPAQUE, -0.2f);
-            }
-        }
-        if (view_ == 1) return;
-        // A shadow under it.
-        WVtx sh[4];
-        const V3 gp = roadPoint(car_.s, car_.x) + V3{0, 0.03f, 0};
-        const V3 f{std::sin(carH) * 2.2f, 0, std::cos(carH) * 2.2f}, r{std::cos(carH) * 1.0f, 0, -std::sin(carH) * 1.0f};
-        sh[0].p = gp - f - r, sh[1].p = gp - f + r, sh[2].p = gp + f + r, sh[3].p = gp + f - r;
-        for (WVtx& w : sh) w.r = w.g = w.b = 20;
-        g32::polygon(gpu_, cam_, sh, 4, -1, g32::HALF, 0.1f);
+    // The other players' cars (online): the same polygons in their own colours, on the road.
+    for (const Other& o : others_) {
+        if (!o.running) continue;
+        const float d = o.s - car_.s;
+        if (d < -40 || d > 600) continue;
+        V3 at = roadPoint(o.s, o.x);
+        drawCar(at, at, headingAt(o.s) + o.psi, 0, 0, rc::carSpec(o.car).livery, false);
     }
+    // Ours.
+    drawCar(carPos, roadPoint(car_.s, car_.x), carH, car_.pitch, car_.roll, livery_, view_ == 1);
 }
 
+// A car's polygons, turned and lit, and a shadow under it (from the driver's seat, just the bonnet).
+void Rally32::drawCar(V3 carPos, V3 ground, float yaw, float pitch, float roll, const uint16_t* livery, bool cockpit) {
+    const float cyw = std::cos(yaw), syw = std::sin(yaw), cp = std::cos(pitch), sp = std::sin(pitch), cr = std::cos(roll), sr = std::sin(roll);
+    auto xf = [&](float x, float y, float z) {
+        y -= 0.7f;  // rolls turn about the middle of the car
+        const float x1 = x * cr - y * sr, y1 = x * sr + y * cr;
+        const float y2 = y1 * cp + z * sp, z2 = -y1 * sp + z * cp;
+        return carPos + V3{x1 * cyw + z2 * syw, y2 + 0.7f, -x1 * syw + z2 * cyw};
+    };
+    const V3 light = g32::normalize({-0.35f, 0.85f, -0.4f});
+    for (const rc::CarPoly& p : rc::carPolys()) {
+        const int n = int(p.xyz.size() / 3);
+        if (cockpit) {  // from the driver's seat you see the bonnet, nothing behind the windscreen
+            bool front = true;
+            for (int k = 0; k < n; k++) front &= p.xyz[size_t(k) * 3 + 2] > 1.05f && p.xyz[size_t(k) * 3 + 1] < 0.9f;
+            if (!front) continue;
+        }
+        WVtx q[10];
+        for (int k = 0; k < n && k < 10; k++) q[k].p = xf(p.xyz[size_t(k) * 3], p.xyz[size_t(k) * 3 + 1], p.xyz[size_t(k) * 3 + 2]);
+        V3 nrm = g32::normalize(g32::cross(q[1].p - q[0].p, q[2].p - q[0].p));
+        const bool facing = g32::dot(nrm, cam_.pos - q[0].p) > 0;
+        if (!facing && !p.twoSided) continue;  // back faces
+        if (!facing) nrm = nrm * -1;
+        const uint16_t c = to15(livery[rc::carColorIndex(p.mat, std::max(0.0f, g32::dot(nrm, light)))]);
+        for (int k = 0; k < n; k++) shadeOf(c, q[k].r, q[k].g, q[k].b);
+        // Wheels and caps have up to 10 sides: fan them out in triangles.
+        for (int k = 1; k + 1 < n; k++) {
+            WVtx t[3] = {q[0], q[k], q[k + 1]};
+            g32::polygon(gpu_, cam_, t, 3, -1, g32::OPAQUE, -0.2f);
+        }
+    }
+    if (cockpit) return;
+    // A shadow under it.
+    WVtx sh[4];
+    const V3 gp = ground + V3{0, 0.03f, 0};
+    const V3 f{std::sin(yaw) * 2.2f, 0, std::cos(yaw) * 2.2f}, r{std::cos(yaw) * 1.0f, 0, -std::sin(yaw) * 1.0f};
+    sh[0].p = gp - f - r, sh[1].p = gp - f + r, sh[2].p = gp + f + r, sh[3].p = gp + f - r;
+    for (WVtx& w : sh) w.r = w.g = w.b = 20;
+    g32::polygon(gpu_, cam_, sh, 4, -1, g32::HALF, 0.1f);
+}
 // ================================================================ HUD
 
 void Rally32::text(const std::string& s, float x, float y, float scale, uint16_t color, int align) {
@@ -562,7 +608,13 @@ void Rally32::hud() {
         text(buf, 160, 66, 1, white);
         text(arcade_ ? "HANDLING: ARCADE" : "HANDLING: SIMULATION", 160, 84, 1, arcade_ ? yellow : white);
         text("LEFT/RIGHT STAGE  UP/DOWN CAR  V HANDLING  START GO", 160, 214, 1, white);
+        if (gs::Link::available()) text("W HOST ON LAN   Q FIND A GAME", 160, 226, 1, yellow);
+        if (!lobbyMsg_.empty()) text(lobbyMsg_, 160, 104, 1, red);
         if (best_ > 0) text("BEST " + fmtTime(best_), 160, 196, 1, yellow);
+        return;
+    }
+    if (mode_ == Mode::Lobby) {
+        lobbyHud();
         return;
     }
     if (view_ == 1) cockpitHud();
@@ -573,6 +625,32 @@ void Rally32::hud() {
     text(std::to_string(int(car_.kmh())), 300, 204, 2.4f, white, 1);
     text("KM/H", 314, 214, 1, yellow, 1);
     if (!car_.why.empty() && (car_.state == rc::CarState::Rolling || car_.state == rc::CarState::Recovering)) text(car_.why, 160, 70, 2, red);
+    if (mode_ == Mode::Start) {  // the start clock
+        const int left = (startGo_ - t_ + 59) / 60;
+        text(left > 0 ? "START IN " + std::to_string(left) : "GO!", 160, 70, 2, left > 3 ? white : yellow);
+    }
+    if (mode_ == Mode::Drive && online_) {  // the nearest car ahead, once it's close
+        float gap = 1e9f;
+        for (const Other& o : others_)
+            if (o.running && !o.finished && o.s > car_.s && o.s - car_.s < 250) gap = std::min(gap, o.s - car_.s);
+        if (gap < 1e8f) text("CAR AHEAD " + std::to_string(int(gap)) + "M", 312, 22, 1, white, 1);
+    }
+    if (mode_ == Mode::Done && online_) {  // the results, as the others finish
+        text("FINISH", 160, 30, 2.4f, yellow);
+        const VersusReport r = versusReport();
+        struct Row { std::string name; float t; bool me, fin; };
+        std::vector<Row> rows;
+        for (int s = 0; s < rally::MAX_PLAYERS; s++)
+            if (r.active[s]) rows.push_back({s == r.mySlot ? myName_ : (r.names[s].empty() ? "PLAYER" : r.names[s]), s == r.mySlot ? time_ : r.times[s], s == r.mySlot, s == r.mySlot || r.finishedSlot[s]});
+        std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.fin != b.fin ? a.fin : a.t < b.t; });
+        for (size_t k = 0; k < rows.size(); k++) {
+            const std::string place = std::to_string(k + 1) + "  " + rows[k].name;
+            text(place, 60, 70 + k * 20.0f, 1.3f, rows[k].me ? yellow : white, -1);
+            text(rows[k].fin ? fmtTime(rows[k].t) : "DRIVING", 260, 70 + k * 20.0f, 1.3f, rows[k].me ? yellow : white, 1);
+        }
+        if (t_ > 60 && t_ % 60 < 40) text("PRESS START", 160, 196, 1.4f, yellow);
+        return;
+    }
     if (mode_ == Mode::Done) {
         text("FINISH", 160, 60, 3, yellow);
         text(fmtTime(time_), 160, 96, 2, white);
@@ -679,6 +757,40 @@ double Rally32::benchmark(int frames) {
     if (ms.empty()) return 0;
     std::nth_element(ms.begin(), ms.begin() + long(ms.size() / 2), ms.end());
     return ms[ms.size() / 2];
+}
+
+}  // namespace rc32
+
+namespace rc32 {
+
+// The online lobby: hosting (who has joined, START to go) or finding a game on the LAN.
+void Rally32::lobbyHud() {
+    const uint16_t white = 0x7fff, yellow = uint16_t(31 << 10 | 26 << 5 | 0);
+    text("ONLINE", 160, 20, 2, yellow);
+    const rc::Venue& V = rc::venue(std::clamp(versus_.stage, 0, rc::NUM_STAGES - 1) / 3);
+    text(std::string(V.name) + " - " + V.stages[std::clamp(versus_.stage, 0, rc::NUM_STAGES - 1) % 3], 160, 48, 1.2f, white);
+    if (versus_.phase == rally::Versus::Phase::Searching) {
+        text("LOOKING FOR A GAME ON THE LAN" + std::string(size_t(t_ / 20 % 4), '.'), 160, 100, 1, white);
+    } else if (versus_.phase == rally::Versus::Phase::Joining) {
+        text("JOINING" + std::string(size_t(t_ / 20 % 4), '.'), 160, 100, 1.2f, white);
+    } else {
+        for (int s = 0, line = 0; s < rally::MAX_PLAYERS; s++) {
+            const rally::NetPlayer& p = versus_.players[s];
+            if (!p.active) continue;
+            const std::string name = s == versus_.mySlot ? myName_ : p.name.empty() ? "PLAYER" : p.name;
+            text((s == versus_.mySlot ? "> " : "  ") + name, 70, 80 + line * 18.0f, 1.2f, s == versus_.mySlot ? yellow : white, -1);
+            text("STARTS +" + std::to_string(int(s * startGap_)) + "S", 270, 80 + line * 18.0f, 1, white, 1);
+            line++;
+        }
+        if (versus_.isHost) {
+            const std::string ip = gs::Link::localAddress();
+            if (!ip.empty()) text("ADDRESS " + ip + ":" + std::to_string(versus_.gamePort), 160, 172, 1, white);
+            text(versus_.playerCount() >= 2 ? "START: GO" : "WAITING FOR PLAYERS", 160, 196, 1.4f, yellow);
+        } else {
+            text("THE HOST STARTS THE RACE", 160, 196, 1.2f, yellow);
+        }
+    }
+    text("ESC LEAVES", 160, 222, 1, white);
 }
 
 }  // namespace rc32

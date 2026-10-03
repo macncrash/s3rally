@@ -646,17 +646,29 @@ int main(int argc, char** argv) {
                 disc |= !std::strcmp(argv[k], "--discover");
                 if (!std::strcmp(argv[k], "--players") && k + 1 < argc) players = std::atoi(argv[k + 1]);
             }
-            return versusTest(st, players, disc, cartName != "run");
+            return versusTest(st, players, disc, quadCartFor(cartName));
         }
-        else if (!std::strcmp(argv[i], "--demo")) return runQuad(4, 0, cartName != "run", true);  // four-way, fullscreen
-        else if (!std::strcmp(argv[i], "--quad-shot") && i + 1 < argc) return quadShot(4, i + 2 < argc && std::isdigit(static_cast<unsigned char>(argv[i + 2][0])) ? std::atoi(argv[i + 2]) : 45, argv[i + 1]);
+        else if (!std::strcmp(argv[i], "--menu-shot") && i + 1 < argc) {  // a still of the multi-cart menu, 4 PLAYERS chosen
+            gs::System s(true);
+            MultiCart m;
+            s.bootCart(m);
+            for (int f = 0; f < 30; f++) {
+                s.pad.tapped[gs::BTN_UP] = f == 12;  // (from the first entry, up wraps to the last)
+                s.pad.tapped[gs::BTN_RIGHT] = f == 16 || f == 20;
+                s.step();
+            }
+            s.render();
+            return s.saveScreenshot(argv[i + 1]) ? 0 : 1;
+        }
+        else if (!std::strcmp(argv[i], "--demo")) return runQuad(4, 0, quadCartFor(cartName), true);  // four-way, fullscreen
+        else if (!std::strcmp(argv[i], "--quad-shot") && i + 1 < argc) return quadShot(4, i + 2 < argc && std::isdigit(static_cast<unsigned char>(argv[i + 2][0])) ? std::atoi(argv[i + 2]) : 45, argv[i + 1], quadCartFor(cartName));
         else if (!std::strcmp(argv[i], "--quad")) {
             const int players = i + 1 < argc && std::isdigit(static_cast<unsigned char>(argv[i + 1][0])) ? std::atoi(argv[i + 1]) : 4;
-            return runQuad(players, 0, cartName != "run");
+            return runQuad(players, 0, quadCartFor(cartName));
         }
         else if (!std::strcmp(argv[i], "--record-quad") && i + 1 < argc) {
             const int players = i + 2 < argc && std::isdigit(static_cast<unsigned char>(argv[i + 2][0])) ? std::atoi(argv[i + 2]) : 4;
-            return recordQuad(players, 0, argv[i + 1], cartName != "run");
+            return recordQuad(players, 0, argv[i + 1], quadCartFor(cartName));
         }
         else if (!std::strcmp(argv[i], "--verify-run") && i + 1 < argc) return verifyRun(argv[i + 1]);
         else if (!std::strcmp(argv[i], "--replay-test")) return replayTest();
@@ -712,7 +724,17 @@ int main(int argc, char** argv) {
     else if (cartName == "run") direct = std::make_unique<rally::Rally>();
     else if (cartName == "rally32") direct = std::make_unique<rc32::Rally32>();
     else if (cartName == "rally64") direct = std::make_unique<rc32::Rally32>(g32::Model::S3_64);
-    auto sys = std::make_unique<gs::System>();
-    sys->setHome(*menu);
-    return sys->run(direct ? *direct : *menu);
+    // The menu can ask for the party split screen (4 PLAYERS): it closes its window, the split
+    // screen runs in its own, and Esc there brings the menu back.
+    for (;;) {
+        auto sys = std::make_unique<gs::System>();
+        sys->setHome(*menu);
+        const int rc = sys->run(direct ? *direct : *menu);
+        direct.reset();
+        const int party = menu->partyRequest();
+        if (party < 0) return rc;
+        menu->clearParty();
+        sys.reset();
+        runQuad(4, 0, party == 0 ? QuadCart::Rally : party == 1 ? QuadCart::Rally32 : QuadCart::Rally64, true);
+    }
 }

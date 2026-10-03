@@ -22,6 +22,16 @@ const Entry GAMES[] = {
     {"S3 RUN", "THE ORIGINAL ARCADE RACER", "BEAT THE CLOCK, PASS THE PACK."},
 };
 constexpr int N_GAMES = int(sizeof GAMES / sizeof GAMES[0]);
+const char* PARTY[3] = {"(3) RALLY", "(3) RALLY 32", "(3) RALLY 64"};
+// The party demo (four consoles in one window) needs the network and threads: not in a browser.
+bool partyOffered() {
+#ifdef __EMSCRIPTEN__
+    return false;
+#else
+    return gs::Link::available();
+#endif
+}
+int entries() { return N_GAMES + (partyOffered() ? 1 : 0); }
 }  // namespace
 
 MultiCart::MultiCart() = default;
@@ -76,12 +86,13 @@ void MultiCart::draw(gs::System& sys) {
     };
     auto centre = [&](int row, const std::string& s, int pal) { put(20 - int(s.size()) / 2, row, s, pal); };
     centre(6, "MULTI-CART  -  CHOOSE A GAME", 0);
-    for (int i = 0; i < N_GAMES; i++) {
-        const int row = 8 + i * 4;
+    for (int i = 0; i < entries(); i++) {
+        const int row = 8 + i * 3;
         const bool on = i == sel_;
-        centre(row, (on ? "> " : "  ") + std::string(GAMES[i].name) + (on ? " <" : "  "), on ? 15 : 0);
-        centre(row + 1, GAMES[i].line1, 0);
-        centre(row + 2, GAMES[i].line2, 0);
+        const bool party = i == N_GAMES;
+        const std::string name = party ? "4 PLAYERS" : GAMES[i].name;
+        centre(row, (on ? "> " : "  ") + name + (on ? " <" : "  "), on ? 15 : 0);
+        centre(row + 1, party ? std::string("< ") + PARTY[partyPick_] + " >  SPLIT SCREEN" : std::string(GAMES[i].line1), party && on ? 15 : 0);
     }
     if (t_ % 60 < 40) centre(24, "PRESS START", 15);
     centre(26, "ESC ON A TITLE SCREEN COMES BACK HERE", 0);
@@ -91,9 +102,19 @@ void MultiCart::draw(gs::System& sys) {
 void MultiCart::frame(gs::System& sys) {
     t_++;
     gs::Pad& pad = sys.pad;
-    if (pad.pressed(gs::BTN_UP)) sel_ = (sel_ + N_GAMES - 1) % N_GAMES;
-    if (pad.pressed(gs::BTN_DOWN)) sel_ = (sel_ + 1) % N_GAMES;
+    const int n = entries();
+    if (pad.pressed(gs::BTN_UP)) sel_ = (sel_ + n - 1) % n;
+    if (pad.pressed(gs::BTN_DOWN)) sel_ = (sel_ + 1) % n;
+    if (sel_ == N_GAMES) {  // 4 PLAYERS: left and right pick the machine
+        if (pad.pressed(gs::BTN_LEFT)) partyPick_ = (partyPick_ + 2) % 3;
+        if (pad.pressed(gs::BTN_RIGHT)) partyPick_ = (partyPick_ + 1) % 3;
+    }
     draw(sys);
+    if (t_ > 10 && sel_ == N_GAMES && (pad.pressed(gs::BTN_START) || pad.pressed(gs::BTN_C))) {
+        party_ = partyPick_;  // main() runs the split screen, then brings the menu back
+        sys.quit();
+        return;
+    }
     if (t_ > 10 && (pad.pressed(gs::BTN_START) || pad.pressed(gs::BTN_C))) {
         sys.saveBlob("cart.txt", sel_ == 0 ? "rally" : sel_ == 1 ? "rally32" : sel_ == 2 ? "rally64" : "run");
         gs::Cart* c;

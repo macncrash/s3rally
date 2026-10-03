@@ -18,12 +18,20 @@
 #include "console/system.h"
 #include "game/rally.h"
 #include "rc/game.h"
+#include "rc32/rally32.h"
 
 namespace {
 
 constexpr uint16_t TEST_PORT = 47117;
 constexpr uint16_t TEST_DISCOVERY = 47216;  // private, so nothing else on 47016 interferes
 const char* DEMO_NAMES[4] = {"RADRACER", "NEON FOX", "BIG RED", "SIDEWAYS"};
+g32::Model g_model = g32::Model::S3_32;  // which machine the 3D carts are built for (RALLY 32 or 64)
+
+template <class Cart>
+std::unique_ptr<Cart> makeCart() {
+    if constexpr (std::is_same_v<Cart, rc32::Rally32>) return std::make_unique<Cart>(g_model);
+    else return std::make_unique<Cart>();
+}
 
 // One console in a session, with either cartridge in it.
 template <class Cart>
@@ -36,6 +44,8 @@ const char* stageName(const rally::Rally*, int stage) { return rally::stageDef(s
 const char* stageName(const rc::RallyChamp*, int stage) { return rc::venue(stage / 3).stages[stage % 3]; }
 int stageCount(const rally::Rally*) { return rally::NUM_STAGES; }
 int stageCount(const rc::RallyChamp*) { return rc::NUM_STAGES; }
+const char* stageName(const rc32::Rally32*, int stage) { return rc::venue(stage / 3).stages[stage % 3]; }
+int stageCount(const rc32::Rally32*) { return rc::NUM_STAGES; }
 
 // Boot n consoles; seat 0 hosts, the others join it over UDP.
 template <class Cart>
@@ -45,7 +55,7 @@ bool startSession(std::vector<Seat<Cart>>& seats, int n, int stage, bool discove
         if (int(seats.size()) <= i) {
             Seat<Cart> s;
             s.sys = std::make_unique<gs::System>(true);
-            s.cart = std::make_unique<Cart>();
+            s.cart = makeCart<Cart>();
             s.sys->bootCart(*s.cart);
             seats.push_back(std::move(s));
         }
@@ -71,17 +81,22 @@ bool allDone(const std::vector<Seat<Cart>>& seats) {
     return true;
 }
 
-// Paste each console's 320x224 screen into a 2x2 grid with thin dividers.
+// Paste each console's picture (as rendered: 320x224 for the S3-16, 320x240 for the S3-32,
+// 640x480 for the S3-64) into a 2x2 grid with thin dividers. `w` and `h` come back as the
+// grid's size.
 template <class Cart>
-void composite(const std::vector<Seat<Cart>>& seats, std::vector<uint32_t>& out) {
-    const int W = gs::SCREEN_W, H = gs::SCREEN_H;
-    out.assign(size_t(W * 2) * H * 2, 0xff101010u);
+void composite(const std::vector<Seat<Cart>>& seats, std::vector<uint32_t>& out, int& w, int& h) {
+    const int W = seats[0].sys->shownW, H = seats[0].sys->shownH;
+    w = W * 2, h = H * 2;
+    out.assign(size_t(w) * size_t(h), 0xff101010u);
     for (size_t i = 0; i < seats.size() && i < 4; i++) {
+        const gs::System& s = *seats[i].sys;
+        if (s.shownW != W || s.shownH != H) continue;  // (all seats run the same machine)
         const int ox = int(i % 2) * W, oy = int(i / 2) * H;
-        for (int y = 0; y < H; y++) std::memcpy(&out[size_t(oy + y) * W * 2 + ox], &seats[i].sys->fb[size_t(y) * W], W * 4);
+        for (int y = 0; y < H; y++) std::memcpy(&out[size_t(oy + y) * size_t(w) + size_t(ox)], &s.shown[size_t(y) * size_t(W)], size_t(W) * 4);
     }
-    for (int y = 0; y < H * 2; y++) out[size_t(y) * W * 2 + W - 1] = out[size_t(y) * W * 2 + W] = 0xff000000u;
-    for (int x = 0; x < W * 2; x++) out[size_t(H - 1) * W * 2 + x] = out[size_t(H) * W * 2 + x] = 0xff000000u;
+    for (int y = 0; y < h; y++) out[size_t(y) * size_t(w) + size_t(W - 1)] = out[size_t(y) * size_t(w) + size_t(W)] = 0xff000000u;
+    for (int x = 0; x < w; x++) out[size_t(H - 1) * size_t(w) + size_t(x)] = out[size_t(H) * size_t(w) + size_t(x)] = 0xff000000u;
 }
 
 }  // namespace
@@ -149,23 +164,30 @@ int recordQuadT(int n, int stage, const char* mp4Path) {
     if (!startSession(seats, n, stage, false, names, {1.0f, 0.985f, 0.97f, 0.955f})) return 1;
     seats[0].sys->apu.init(48000);  // the film carries player 1's sound
     const std::string tmpVideo = std::string(mp4Path) + ".video.mp4", tmpAudio = std::string(mp4Path) + ".audio.raw";
-    const std::string enc = "ffmpeg -loglevel error -y -f rawvideo -pix_fmt bgra -s 640x448 -r 60 -i - "
-                            "-vf scale=1280:896:flags=neighbor -c:v libx264 -crf 21 -preset medium -pix_fmt yuv420p '" + tmpVideo + "'";
-    FILE* video = popen(enc.c_str(), "w");
+    // The picture's size depends on the machine: the encoder starts with the first frame.
+    auto encoder = [&](int fw, int fh) {
+        const int scale = fw >= 1280 ? 1 : 2;
+        const std::string enc = "ffmpeg -loglevel error -y -f rawvideo -pix_fmt bgra -s " + std::to_string(fw) + "x" + std::to_string(fh) +
+                                " -r 60 -i - -vf scale=" + std::to_string(fw * scale) + ":" + std::to_string(fh * scale) +
+                                ":flags=neighbor -c:v libx264 -crf 21 -preset medium -pix_fmt yuv420p '" + tmpVideo + "'";
+        return popen(enc.c_str(), "w");
+    };
+    FILE* video = nullptr;
     FILE* audio = std::fopen(tmpAudio.c_str(), "wb");
-    if (!video || !audio) {
-        if (video) pclose(video);
-        if (audio) std::fclose(audio);
-        std::printf("record: needs ffmpeg\n");
-        return 1;
-    }
+    if (!audio) return 1;
     std::vector<uint32_t> frame;
+    int fw = 0, fh = 0;
     std::vector<float> sound(800 * 2);
     int frames = 0, after = 0;
     while (frames < 60 * 240 && after < 60 * 6) {  // the whole race, then six seconds of results
         for (auto& s : seats) s.sys->step();
         for (auto& s : seats) s.sys->render();
-        composite(seats, frame);
+        composite(seats, frame, fw, fh);
+        if (!video && !(video = encoder(fw, fh))) {
+            std::fclose(audio);
+            std::printf("record: needs ffmpeg\n");
+            return 1;
+        }
         std::fwrite(frame.data(), 4, frame.size(), video);
         seats[0].sys->apu.render(sound.data(), 800);
         std::fwrite(sound.data(), sizeof(float), sound.size(), audio);
@@ -173,7 +195,7 @@ int recordQuadT(int n, int stage, const char* mp4Path) {
         frames++;
         std::this_thread::sleep_for(std::chrono::microseconds(250));
     }
-    pclose(video);
+    if (video) pclose(video);
     std::fclose(audio);
     const std::string mux = "ffmpeg -loglevel error -y -i '" + tmpVideo + "' -f f32le -ar 48000 -ac 2 -i '" + tmpAudio +
                             "' -c:v copy -c:a aac -b:a 160k -shortest -movflags +faststart -map_metadata -1 '" + mp4Path + "'";
@@ -190,41 +212,41 @@ void quadAudio(void* user, Uint8* stream, int len) {
 }
 }  // namespace
 
-// Text on the 640x448 quad picture, in the console's 5x7 font at double size.
-static void quadText(std::vector<uint32_t>& f, int x, int y, const std::string& s, uint32_t ink, bool box) {
-    const int w = int(s.size()) * 12 + 6, h = 20;
+// Text on the quad picture (fw x fh), in the console's 5x7 font: twice size on the 640-wide
+// pictures, four times on the S3-64's 1280-wide one.
+static void quadText(std::vector<uint32_t>& f, int fw, int fh, int x, int y, const std::string& s, uint32_t ink, bool box) {
+    const int k = fw >= 1280 ? 4 : 2;  // pixels per font dot
+    const int adv = 6 * k, w = int(s.size()) * adv + 3 * k, h = 10 * k;
     if (box)
-        for (int yy = y - 3; yy < y - 3 + h; yy++)
-            for (int xx = x - 3; xx < x - 3 + w; xx++)
-                if (xx >= 0 && xx < 640 && yy >= 0 && yy < 448) {
-                    uint32_t& p = f[size_t(yy) * 640 + size_t(xx)];
+        for (int yy = y - k - k / 2; yy < y - k - k / 2 + h; yy++)
+            for (int xx = x - k - k / 2; xx < x - k - k / 2 + w; xx++)
+                if (xx >= 0 && xx < fw && yy >= 0 && yy < fh) {
+                    uint32_t& p = f[size_t(yy) * size_t(fw) + size_t(xx)];
                     p = 0xff000000u | ((p >> 2) & 0x3f3f3fu);  // darkened behind the text
                 }
-    for (size_t k = 0; k < s.size(); k++) {
-        const uint8_t* g = gs::glyph(s[k]);
+    for (size_t c = 0; c < s.size(); c++) {
+        const uint8_t* g = gs::glyph(s[c]);
         if (!g) continue;
         for (int gy = 0; gy < 7; gy++)
             for (int gx = 0; gx < 5; gx++)
                 if (g[gy * 5 + gx])
-                    for (int d = 0; d < 4; d++) {
-                        const int px = x + int(k) * 12 + gx * 2 + d % 2, py = y + gy * 2 + d / 2;
-                        if (px >= 0 && px < 640 && py >= 0 && py < 448) f[size_t(py) * 640 + size_t(px)] = ink;
+                    for (int d = 0; d < k * k; d++) {
+                        const int px = x + int(c) * adv + gx * k + d % k, py = y + gy * k + d / k;
+                        if (px >= 0 && px < fw && py >= 0 && py < fh) f[size_t(py) * size_t(fw) + size_t(px)] = ink;
                     }
     }
 }
 
-// Seat i's tag in the corner of its quarter (with the lines between the quarters).
-static void quadLabel(std::vector<uint32_t>& f, int i, const std::string& s, bool human) {
-    const int ox = (i % 2) * 320, oy = (i / 2) * 224;
-    for (int y = 0; y < 448; y++) f[size_t(y) * 640 + 319] = f[size_t(y) * 640 + 320] = 0xff000000u;
-    for (int x = 0; x < 640; x++) f[223 * 640 + size_t(x)] = f[224 * 640 + size_t(x)] = 0xff000000u;
-    quadText(f, ox + 6, oy + 224 - 22, s, human ? 0xffffd23cu : 0xffb0b4c0u, true);
+// Seat i's tag in the corner of its quarter.
+static void quadLabel(std::vector<uint32_t>& f, int fw, int fh, int i, const std::string& s, bool human) {
+    const int qw = fw / 2, qh = fh / 2, k = fw >= 1280 ? 4 : 2;
+    quadText(f, fw, fh, (i % 2) * qw + 3 * k, (i / 2) * qh + qh - 11 * k, s, human ? 0xffffd23cu : 0xffb0b4c0u, true);
 }
 
 // A prompt across the middle of seat i's quarter.
-static void quadHint(std::vector<uint32_t>& f, int i, const std::string& s) {
-    const int ox = (i % 2) * 320, oy = (i / 2) * 224;
-    quadText(f, ox + 160 - int(s.size()) * 6, oy + 120, s, 0xffffffffu, true);
+static void quadHint(std::vector<uint32_t>& f, int fw, int fh, int i, const std::string& s) {
+    const int qw = fw / 2, qh = fh / 2, k = fw >= 1280 ? 4 : 2;
+    quadText(f, fw, fh, (i % 2) * qw + qw / 2 - int(s.size()) * 3 * k, (i / 2) * qh + qh * 54 / 100, s, 0xffffffffu, true);
 }
 
 template <class Cart>
@@ -241,7 +263,8 @@ int runQuadT(int n, int stage, bool demo) {
         return 1;
     }
     SDL_ShowCursor(fullscreen ? SDL_DISABLE : SDL_ENABLE);
-    SDL_Texture* tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 640, 448);
+    SDL_Texture* tex = nullptr;  // made with the first picture, at that machine's size
+    int texW = 0, texH = 0;
 
     // Every seat starts with the autopilot; seat 0 also answers the keyboard.
     std::vector<Seat<Cart>> seats;
@@ -252,7 +275,7 @@ int runQuadT(int n, int stage, bool demo) {
     for (int i = 0; i < n; i++) seats[size_t(i)].sys->scripted = i == 0;  // player 1: keyboard (or the first pad)
     // The demo starts the cars 2 s apart so they race together (a real rally is 10 s).
     auto gaps = [&] {
-        if constexpr (std::is_same_v<Cart, rc::RallyChamp>)
+        if constexpr (!std::is_same_v<Cart, rally::Rally>)  // (S3 RUN starts as a pack)
             for (auto& s : seats) s.cart->testStartGap(demo ? 2.0f : 10.0f);
     };
     gaps();
@@ -369,14 +392,20 @@ int runQuadT(int n, int stage, bool demo) {
         }
         if (steps) {
             for (auto& s : seats) s.sys->render();
-            composite(seats, frame);
+            int fw = 0, fh = 0;
+            composite(seats, frame, fw, fh);
             for (int i = 0; i < n; i++) {
                 const bool human = seatHuman(i);
                 const std::string who = i == 0 ? (padOf[0] >= 0 ? "PAD" : "KEYS") : human ? "PAD" : "CPU";
-                quadLabel(frame, i, "P" + std::to_string(i + 1) + " " + who, human);
-                if (!human && (tick / 40) % 2) quadHint(frame, i, "PRESS START TO JOIN");
+                quadLabel(frame, fw, fh, i, "P" + std::to_string(i + 1) + " " + who, human);
+                if (!human && (tick / 40) % 2) quadHint(frame, fw, fh, i, "PRESS START TO JOIN");
             }
-            SDL_UpdateTexture(tex, nullptr, frame.data(), 640 * 4);
+            if (!tex || fw != texW || fh != texH) {
+                if (tex) SDL_DestroyTexture(tex);
+                tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, fw, fh);
+                texW = fw, texH = fh;
+            }
+            SDL_UpdateTexture(tex, nullptr, frame.data(), fw * 4);
         }
         int ww, wh;
         SDL_GetRendererOutputSize(ren, &ww, &wh);
@@ -385,12 +414,12 @@ int runQuadT(int n, int stage, bool demo) {
         SDL_Rect dst{(ww - dw) / 2, (wh - dh) / 2, dw, dh};
         SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
         SDL_RenderClear(ren);
-        SDL_RenderCopy(ren, tex, nullptr, &dst);
+        if (tex) SDL_RenderCopy(ren, tex, nullptr, &dst);
         SDL_RenderPresent(ren);
     }
     if (dev) SDL_CloseAudioDevice(dev);  // before the consoles (and their samples) go away
     for (Pad& p : pads) SDL_GameControllerClose(p.c);
-    SDL_DestroyTexture(tex);
+    if (tex) SDL_DestroyTexture(tex);
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
     seats.clear();
@@ -398,15 +427,24 @@ int runQuadT(int n, int stage, bool demo) {
     return 0;
 }
 
-int versusTest(int stage, int players, bool discover, bool champ) {
-    return champ ? versusTestT<rc::RallyChamp>(stage, players, discover) : versusTestT<rally::Rally>(stage, players, discover);
+QuadCart quadCartFor(const std::string& name) {
+    return name == "run" ? QuadCart::Run : name == "rally32" ? QuadCart::Rally32 : name == "rally64" ? QuadCart::Rally64 : QuadCart::Rally;
 }
-int recordQuad(int players, int stage, const char* mp4Path, bool champ) {
-    return champ ? recordQuadT<rc::RallyChamp>(players, stage, mp4Path) : recordQuadT<rally::Rally>(players, stage, mp4Path);
-}
-int runQuad(int players, int stage, bool champ, bool fullscreen) {
-    return champ ? runQuadT<rc::RallyChamp>(players, stage, fullscreen) : runQuadT<rally::Rally>(players, stage, fullscreen);
-}
+
+// Run F with the template for that cartridge (and the 3D carts on the right machine).
+#define S3_QUAD_DISPATCH(cart, F, ...)                                                       \
+    do {                                                                                   \
+        g_model = (cart) == QuadCart::Rally64 ? g32::Model::S3_64 : g32::Model::S3_32;    \
+        switch (cart) {                                                                    \
+            case QuadCart::Run: return F<rally::Rally>(__VA_ARGS__);                       \
+            case QuadCart::Rally: return F<rc::RallyChamp>(__VA_ARGS__);                   \
+            default: return F<rc32::Rally32>(__VA_ARGS__);                                 \
+        }                                                                                  \
+    } while (0)
+
+int versusTest(int stage, int players, bool discover, QuadCart cart) { S3_QUAD_DISPATCH(cart, versusTestT, stage, players, discover); }
+int recordQuad(int players, int stage, const char* mp4Path, QuadCart cart) { S3_QUAD_DISPATCH(cart, recordQuadT, players, stage, mp4Path); }
+int runQuad(int players, int stage, QuadCart cart, bool demo) { S3_QUAD_DISPATCH(cart, runQuadT, players, stage, demo); }
 
 namespace {
 // A still of the quad screen after `seconds` of racing (all autopilot), labels and all, to FILE.png.
@@ -416,30 +454,46 @@ int quadShotT(int n, int seconds, const char* png) {
     std::vector<std::string> names;
     for (int i = 0; i < n; i++) names.push_back("PLAYER " + std::to_string(i + 1));
     if (!startSession(seats, n, 0, false, names, {1.0f, 0.98f, 0.96f, 0.94f})) return 1;
-    if (std::getenv("S3_QUAD_GAP"))
-        for (auto& s : seats) s.cart->testStartGap(float(std::atof(std::getenv("S3_QUAD_GAP"))));
+    if constexpr (!std::is_same_v<Cart, rally::Rally>)
+        if (std::getenv("S3_QUAD_GAP"))
+            for (auto& s : seats) s.cart->testStartGap(float(std::atof(std::getenv("S3_QUAD_GAP"))));
     const bool realtime = std::getenv("S3_QUAD_REALTIME") != nullptr;  // paced like the live window (the network runs in real time)
     for (int f = 0; f < 60 * seconds; f++) {
         for (auto& s : seats) s.sys->step();
         if (realtime) std::this_thread::sleep_for(std::chrono::microseconds(16667));
     }
+    if (std::getenv("S3_QUAD_BENCH")) {  // milliseconds to step and draw all four, the median of 120 frames
+        std::vector<double> ms;
+        std::vector<uint32_t> tmp;
+        for (int f = 0; f < 120; f++) {
+            const auto t0 = std::chrono::steady_clock::now();
+            for (auto& s : seats) s.sys->step();
+            for (auto& s : seats) s.sys->render();
+            int w = 0, h = 0;
+            composite(seats, tmp, w, h);
+            ms.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+        }
+        std::sort(ms.begin(), ms.end());
+        std::printf("four-way frame: %.2f ms median (budget 16.7 ms)\n", ms[ms.size() / 2]);
+    }
     for (auto& s : seats) s.sys->render();
     std::vector<uint32_t> frame;
-    composite(seats, frame);
+    int fw = 0, fh = 0;
+    composite(seats, frame, fw, fh);
     for (int i = 0; i < n; i++) {
-        quadLabel(frame, i, "P" + std::to_string(i + 1) + (i == 0 ? " KEYS" : i == 1 ? " PAD" : " CPU"), i < 2);
-        if (i >= 2) quadHint(frame, i, "PRESS START TO JOIN");
+        quadLabel(frame, fw, fh, i, "P" + std::to_string(i + 1) + (i == 0 ? " KEYS" : i == 1 ? " PAD" : " CPU"), i < 2);
+        if (i >= 2) quadHint(frame, fw, fh, i, "PRESS START TO JOIN");
     }
     const std::string raw = std::string(png) + ".raw";
     FILE* f = std::fopen(raw.c_str(), "wb");
     if (!f) return 1;
     std::fwrite(frame.data(), 4, frame.size(), f);
     std::fclose(f);
-    const std::string cmd = "ffmpeg -v error -y -f rawvideo -pixel_format bgra -video_size 640x448 -i '" + raw + "' '" + png + "'";
+    const std::string cmd = "ffmpeg -v error -y -f rawvideo -pixel_format bgra -video_size " + std::to_string(fw) + "x" + std::to_string(fh) + " -i '" + raw + "' '" + png + "'";
     const int rc = std::system(cmd.c_str());
     std::remove(raw.c_str());
     return rc == 0 ? 0 : 1;
 }
 }  // namespace
 
-int quadShot(int players, int seconds, const char* png) { return quadShotT<rc::RallyChamp>(players, seconds, png); }
+int quadShot(int players, int seconds, const char* png, QuadCart cart) { S3_QUAD_DISPATCH(cart, quadShotT, players, seconds, png); }
